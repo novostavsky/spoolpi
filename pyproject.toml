@@ -31,6 +31,7 @@ python_version = "3.11"
 strict = true
 
 [tool.pytest.ini_options]
+addopts = "-m 'not slow'"
 markers = [
     "slow: crash-cycle tests that take a while to run",
 ]

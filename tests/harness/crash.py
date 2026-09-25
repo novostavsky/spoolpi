@@ -12,6 +12,7 @@ import random
 import subprocess
 import sys
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,13 +30,16 @@ def run_until_killed(
     *,
     cwd: Path | None = None,
     kill_timeout: float = 5.0,
+    stdout_path: Path | None = None,
 ) -> CrashResult:
-    proc = subprocess.Popen(argv, cwd=cwd)
-    time.sleep(kill_after)
-    was_killed = proc.poll() is None
-    if was_killed:
-        proc.kill()  # SIGKILL, not SIGTERM -- no clean shutdown
-    proc.wait(timeout=kill_timeout)
+    # A file, not a pipe: what the child wrote survives the kill and can't block it.
+    with open(stdout_path, "wb") if stdout_path is not None else nullcontext() as out:
+        proc = subprocess.Popen(argv, cwd=cwd, stdout=out)
+        time.sleep(kill_after)
+        was_killed = proc.poll() is None
+        if was_killed:
+            proc.kill()  # SIGKILL, not SIGTERM -- no clean shutdown
+        proc.wait(timeout=kill_timeout)
     return CrashResult(kill_after_s=kill_after, returncode=proc.returncode, was_killed=was_killed)
 
 
