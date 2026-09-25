@@ -15,6 +15,7 @@ import os
 import random
 import threading
 import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -147,19 +148,39 @@ class Shipper:
             buf.close()
 
     def _ship_once(self, buf: Buffer) -> _Outcome:
+        # Gaps go first: they're rare, small, and what an auditor looks for.
+        gaps = buf.claim_gaps(self._batch_size)
+        if gaps:
+            return self._ship(
+                [(g.id, Envelope(buf.buffer_id, g.seq, g.gap)) for g in gaps],
+                buf.ack_gaps,
+                buf.release_gaps,
+            )
         claimed = buf.claim(self._batch_size)
         if not claimed:
             return _Outcome.EMPTY
-        id_by_seq = {s.seq: s.id for s in claimed}
-        batch = [Envelope(buf.buffer_id, s.seq, self._correct(s.reading)) for s in claimed]
+        return self._ship(
+            [(s.id, Envelope(buf.buffer_id, s.seq, self._correct(s.reading))) for s in claimed],
+            buf.ack,
+            buf.release,
+        )
+
+    def _ship(
+        self,
+        rows: list[tuple[int, Envelope]],
+        ack: Callable[[Iterable[int]], int],
+        release: Callable[[Iterable[int]], int],
+    ) -> _Outcome:
+        id_by_seq = {env.seq: row_id for row_id, env in rows}
+        batch = [env for _, env in rows]
         acks = self._send(batch)
         # Seqs the sink claims but we never sent are ignored.
         accepted = {q for q in acks.accepted if q in id_by_seq} if acks is not None else set()
         rest = [row_id for seq, row_id in id_by_seq.items() if seq not in accepted]
         if accepted:
-            self.stats.acked += buf.ack(id_by_seq[seq] for seq in accepted)
+            self.stats.acked += ack(id_by_seq[seq] for seq in accepted)
         if rest:
-            self.stats.released += buf.release(rest)
+            self.stats.released += release(rest)
         return _Outcome.PROGRESS if accepted else _Outcome.FAILED
 
     def _correct(self, reading: Reading) -> Reading:

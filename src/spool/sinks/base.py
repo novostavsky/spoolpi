@@ -13,13 +13,16 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from spool.core.reading import Reading
+from spool.core.retention import GapRecord
 
 
 @dataclass(frozen=True, slots=True)
 class Envelope:
+    """One record for the sink. Gap records share the reading key space."""
+
     buffer_id: str
     seq: int
-    reading: Reading
+    payload: Reading | GapRecord
 
     @property
     def key(self) -> tuple[str, int]:
@@ -49,6 +52,34 @@ class AckSet:
 
     def __len__(self) -> int:
         return len(self.accepted)
+
+
+def to_wire(e: Envelope) -> dict[str, object]:
+    """The plain-JSON wire form. ``buffer_id`` + ``seq`` is the dedupe key."""
+    head: dict[str, object] = {"buffer_id": e.buffer_id, "seq": e.seq}
+    p = e.payload
+    if isinstance(p, Reading):
+        return head | {
+            "type": "reading",
+            "sensor_id": p.sensor_id,
+            "value": p.value,
+            "unit": p.unit,
+            "mono_ns": p.mono_ns,
+            "wall_ns": p.wall_ns,
+            "boot_id": p.boot_id,
+            "ts_quality": p.ts_quality,
+            "qc_flag": p.qc_flag,
+            "qc_tests": list(p.qc_tests),
+        }
+    return head | {
+        "type": "gap",
+        "sensor_id": p.sensor_id,
+        "boot_id": p.boot_id,
+        "from_mono_ns": p.from_mono_ns,
+        "to_mono_ns": p.to_mono_ns,
+        "reason": p.reason,
+        "count": p.count,
+    }
 
 
 class SinkError(Exception):

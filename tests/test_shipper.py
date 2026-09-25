@@ -9,7 +9,7 @@ import pytest
 
 from spool.core.buffer import ACKED, INFLIGHT, PENDING, BatchWriter, Buffer
 from spool.core.clock import ClockAnchor
-from spool.core.reading import TS_CORRECTED
+from spool.core.reading import TS_CORRECTED, Reading
 from spool.core.shipper import Backoff, Shipper
 from spool.sinks.base import AckSet, Envelope
 from spool.sinks.memory import Hang, MemorySink, Partial, Raise, Reject
@@ -224,5 +224,6 @@ def test_unsynced_readings_are_corrected_at_ship_time(db: Path, running: list[Sh
     ship(db, sink, running, anchor=anchor)
     drain(db)
     for e in sink.received:
-        assert e.reading.ts_quality == TS_CORRECTED
-        assert e.reading.wall_ns == e.reading.mono_ns + offset
+        assert isinstance(e.payload, Reading)
+        assert e.payload.ts_quality == TS_CORRECTED
+        assert e.payload.wall_ns == e.payload.mono_ns + offset

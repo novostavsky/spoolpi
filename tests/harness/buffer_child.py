@@ -7,7 +7,9 @@ rows. Progress goes to stdout with unbuffered writes so it survives SIGKILL:
     w <n>   write(n) returned
     c <n>   the batch ending at n is committed
 
-Usage: python -m tests.harness.buffer_child <db> <start> <max_rows> <wal_autocheckpoint>
+Usage: python -m tests.harness.buffer_child <db> <start> <max_rows> <wal_autocheckpoint> [cap]
+
+With ``cap``, the buffer uses drop_oldest retention at that many unacked rows.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ import time
 from spool.core.buffer import BatchWriter, Buffer
 from spool.core.clock import BOOT_ID, mono_ns, wall_ns
 from spool.core.reading import Reading
+from spool.core.retention import Policy, Retention
 
 
 def report(tag: str, step: int) -> None:
@@ -45,7 +48,9 @@ def shipper(db: str, wal_autocheckpoint: int) -> None:
 
 def main() -> None:
     db, start, max_rows, ckpt = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
-    buf = Buffer(db, wal_autocheckpoint=ckpt)
+    cap = int(sys.argv[5]) if len(sys.argv) > 5 else 0
+    retention = Retention(Policy.DROP_OLDEST, cap) if cap else None
+    buf = Buffer(db, wal_autocheckpoint=ckpt, retention=retention)
     buf.recover_inflight()
     threading.Thread(target=shipper, args=(db, ckpt), daemon=True).start()
 
