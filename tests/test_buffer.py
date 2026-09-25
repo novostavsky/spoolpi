@@ -240,6 +240,44 @@ def test_failed_flush_keeps_the_batch(buf: Buffer, monkeypatch: pytest.MonkeyPat
     assert buf.counts()[PENDING] == 1
 
 
+def test_seq_follows_write_order_across_reopen(tmp_path: Path) -> None:
+    db = tmp_path / "b.db"
+    with Buffer(db, seq_block_size=4) as b:
+        b.append([r(i) for i in range(3)])
+        b.append([r(3)])
+        first_id = b.buffer_id
+    with Buffer(db, seq_block_size=4) as b:
+        b.append([r(4), r(5)])
+        assert b.buffer_id == first_id
+        seqs = [s.seq for s in b.claim(10)]
+    assert seqs == [0, 1, 2, 3, 4, 5]  # block of 4 was used up exactly, so no gap here
+
+
+def test_reopen_mid_block_leaves_a_gap_not_a_reuse(tmp_path: Path) -> None:
+    db = tmp_path / "b.db"
+    with Buffer(db, seq_block_size=10) as b:
+        b.append([r(0)])
+    with Buffer(db, seq_block_size=10) as b:
+        b.append([r(1)])
+        assert [s.seq for s in b.claim(10)] == [0, 10]
+
+
+def test_reader_handles_do_not_reserve_seqs(tmp_path: Path) -> None:
+    db = tmp_path / "b.db"
+    with Buffer(db) as b:
+        b.claim(10)
+        b.counts()
+        assert b._seqs is None
+
+
+def test_rejects_version_1_database(tmp_path: Path) -> None:
+    conn = sqlite3.connect(tmp_path / "b.db")
+    conn.execute("PRAGMA user_version = 1")
+    conn.close()
+    with pytest.raises(RuntimeError, match="schema version 1"):
+        Buffer(tmp_path / "b.db")
+
+
 def test_corrected_quality_survives_storage(buf: Buffer) -> None:
     corrected = Reading("s1", 1.0, "C", 5, 6, "boot", ts_quality=TS_CORRECTED)
     buf.append([corrected])

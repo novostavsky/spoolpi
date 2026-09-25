@@ -22,20 +22,22 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Final, Self
 
+from spool.core.identity import SeqAllocator, init_meta, read_buffer_id
 from spool.core.reading import Reading
 
 PENDING: Final = 0
 INFLIGHT: Final = 1
 ACKED: Final = 2
 
-SCHEMA_VERSION: Final = 1
+SCHEMA_VERSION: Final = 2
 
 # `id` is internal row identity only. It is a plain rowid, so it can be reused
-# after a purge, and must never be shipped as a sequence number.
+# after a purge; `seq` (with `buffer_id`) is what identifies a reading downstream.
 _SCHEMA: Final = (
     """
     CREATE TABLE IF NOT EXISTS readings (
         id         INTEGER PRIMARY KEY,
+        seq        INTEGER NOT NULL UNIQUE,
         sensor_id  TEXT    NOT NULL,
         value      REAL,
         unit       TEXT,
@@ -57,6 +59,7 @@ _COLUMNS: Final = "sensor_id, value, unit, mono_ns, wall_ns, boot_id, ts_quality
 @dataclass(frozen=True, slots=True)
 class Stored:
     id: int
+    seq: int
     reading: Reading
 
 
@@ -76,7 +79,7 @@ def _encode(r: Reading) -> tuple[object, ...]:
 
 
 def _decode(row: Any) -> Stored:
-    row_id, sensor_id, value, unit, mono, wall, boot_id, ts_quality, qc_flag, qc_tests = row
+    row_id, seq, sensor_id, value, unit, mono, wall, boot_id, ts_quality, qc_flag, qc_tests = row
     reading = Reading(
         sensor_id=sensor_id,
         value=value,
@@ -88,7 +91,7 @@ def _decode(row: Any) -> Stored:
         qc_flag=qc_flag,
         qc_tests=tuple(json.loads(qc_tests)),
     )
-    return Stored(id=row_id, reading=reading)
+    return Stored(id=row_id, seq=seq, reading=reading)
 
 
 def _fsync_dir(path: Path) -> None:
@@ -122,7 +125,13 @@ class Buffer:
     a thread other than the one that created it.
     """
 
-    def __init__(self, path: str | os.PathLike[str], *, wal_autocheckpoint: int = 1000) -> None:
+    def __init__(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        wal_autocheckpoint: int = 1000,
+        seq_block_size: int = 1000,
+    ) -> None:
         self.path = Path(path)
         is_new = not self.path.exists()
         self._conn = _connect(self.path, wal_autocheckpoint)
@@ -135,9 +144,13 @@ class Buffer:
                 )
             for stmt in _SCHEMA:
                 c.execute(stmt)
+            init_meta(c)
             c.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            self.buffer_id = read_buffer_id(c)
         if is_new:
             _fsync_dir(self.path.parent)
+        self._seq_block_size = seq_block_size
+        self._seqs: SeqAllocator | None = None  # only writer handles ever allocate
 
     @contextmanager
     def _write(self) -> Iterator[sqlite3.Connection]:
@@ -154,10 +167,15 @@ class Buffer:
     def append(self, readings: Sequence[Reading]) -> None:
         if not readings:
             return
+        if self._seqs is None:
+            self._seqs = SeqAllocator(self._conn, block_size=self._seq_block_size)
+        # Reserved in its own committed transaction first; if the insert then
+        # fails, these numbers are simply never used.
+        seqs = self._seqs.take(len(readings))
         with self._write() as c:
             c.executemany(
-                f"INSERT INTO readings ({_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                map(_encode, readings),
+                f"INSERT INTO readings (seq, {_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ((seq, *_encode(r)) for seq, r in zip(seqs, readings, strict=True)),
             )
 
     def claim(self, limit: int) -> list[Stored]:
@@ -168,7 +186,7 @@ class Buffer:
         """
         with self._write() as c:
             rows = c.execute(
-                f"SELECT id, {_COLUMNS} FROM readings WHERE state = ? ORDER BY id LIMIT ?",
+                f"SELECT id, seq, {_COLUMNS} FROM readings WHERE state = ? ORDER BY id LIMIT ?",
                 (PENDING, limit),
             ).fetchall()
             if rows:
