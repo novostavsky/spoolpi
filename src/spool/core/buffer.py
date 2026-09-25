@@ -107,10 +107,13 @@ class StoredGap:
 
 
 def _encode(r: Reading) -> tuple[object, ...]:
-    # SQLite stores NaN as NULL, so a NaN value comes back as None (a failed read).
+    # A non-finite value is stored as NULL, i.e. a failed read. SQLite already does
+    # that for NaN; inf would serialize as `Infinity`, which strict JSON parsers
+    # reject, turning the row into a poison record the sink refuses forever.
+    value = r.value if r.value is None or math.isfinite(r.value) else None
     return (
         r.sensor_id,
-        r.value,
+        value,
         r.unit,
         r.mono_ns,
         r.wall_ns,
@@ -266,7 +269,8 @@ class Buffer:
                     _record_gaps(c, summarize(readings, REASON_BACKPRESSURE))
                     refused = BufferFull(
                         f"{self.path}: buffer at its cap of {retention.max_rows} unacked "
-                        f"readings; discarded {len(readings)} and recorded a gap"
+                        f"readings; discarded {len(readings)} and recorded a gap",
+                        discarded=len(readings),
                     )
                 else:
                     incoming = self._evict(c, incoming, overflow)

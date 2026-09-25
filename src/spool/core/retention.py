@@ -49,7 +49,15 @@ class GapRecord:
 
 
 class BufferFull(Exception):
-    """halt_and_alarm refused a write. The batch was discarded and recorded as a gap."""
+    """halt_and_alarm refused a write. The batch was discarded and recorded as a gap.
+
+    ``discarded`` is the whole batch, which can include readings written before
+    the one whose write raised.
+    """
+
+    def __init__(self, message: str, discarded: int) -> None:
+        super().__init__(message)
+        self.discarded = discarded
 
 
 def summarize(readings: Iterable[Reading], reason: str) -> list[GapRecord]:

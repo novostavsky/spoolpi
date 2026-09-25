@@ -212,6 +212,20 @@ def test_acked_rows_are_purged_on_cadence(db: Path, running: list[Shipper]) -> N
         wait_for(lambda: b.counts()[ACKED] == 0)
 
 
+def test_purge_keeps_up_beyond_one_chunk(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("spool.core.shipper._PURGE_CHUNK", 7)
+    fill(db, 50)
+    with Buffer(db) as b:
+        b.ack(s.id for s in b.claim(50))
+    s = Shipper(db, MemorySink(), purge_interval_s=0.0, poll_interval_s=0.02)
+    s.start()
+    try:
+        with Buffer(db) as b:
+            wait_for(lambda: b.counts()[ACKED] == 0, timeout_s=1.0)
+    finally:
+        s.stop(timeout_s=2)
+
+
 def test_unsynced_readings_are_corrected_at_ship_time(db: Path, running: list[Shipper]) -> None:
     clock = FakeClock()
     anchor = ClockAnchor(clock)

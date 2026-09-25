@@ -11,16 +11,20 @@ that created the Spool; the buffer connection refuses other threads.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from types import TracebackType
 from typing import Self
 
 from spool.config import Config, SinkConfig, load
+from spool.core import clock
 from spool.core.buffer import INFLIGHT, PENDING, BatchWriter, Buffer
 from spool.core.clock import BOOT_ID, ClockAnchor
 from spool.core.reading import Reading
+from spool.core.retention import BufferFull
 from spool.core.shipper import Backoff, Shipper
 from spool.sinks.base import Sink
 from spool.sinks.jsonl import JsonlSink
@@ -47,7 +51,8 @@ class Spool:
             self._buffer, max_rows=config.batch_max_rows, max_delay_s=config.batch_max_delay_s
         )
         self._anchor = ClockAnchor()
-        self._anchor.start()
+        # The timedatectl fallback spawns a process per poll; too costly every second on a Zero.
+        self._anchor.start(interval_s=1.0 if clock.SYNC_BACKEND == "adjtimex" else 15.0)
         s = config.shipper
         self._shipper = Shipper(
             config.buffer_path,
@@ -61,6 +66,8 @@ class Spool:
         )
         self._shipper.start()
         self._closed = False
+        # Readings refused at the cap under halt_and_alarm, all recorded as gaps.
+        self.discarded = 0
 
     @classmethod
     def from_config(cls, path: str | os.PathLike[str]) -> Spool:
@@ -79,22 +86,38 @@ class Spool:
         self.write_reading(Reading(sensor_id, value, unit, mono, wall, BOOT_ID, quality))
 
     def write_reading(self, reading: Reading) -> None:
-        self._writer.write(reading)
+        with self._counting_refusals():
+            self._writer.write(reading)
         if self._writer.pending_count == 0:
             self._shipper.notify()
 
     def tick(self) -> None:
         """Commit a batch that has waited ``max_delay_s``. Call when idle between writes."""
-        if self._writer.flush_if_due():
+        with self._counting_refusals():
+            flushed = self._writer.flush_if_due()
+        if flushed:
             self._shipper.notify()
 
     def flush(self) -> None:
-        self._writer.flush()
+        with self._counting_refusals():
+            self._writer.flush()
         self._shipper.notify()
 
+    @contextlib.contextmanager
+    def _counting_refusals(self) -> Iterator[None]:
+        try:
+            yield
+        except BufferFull as e:
+            self.discarded += e.discarded
+            raise
+
     def drain(self, timeout_s: float) -> bool:
-        """Commit what's pending and wait until everything is shipped. True if it was."""
-        self.flush()
+        """Commit what's pending and wait until everything is shipped. True if it was.
+
+        A refused final batch is already a gap record, and that gap is shipped too.
+        """
+        with contextlib.suppress(BufferFull):
+            self.flush()
         deadline = time.monotonic() + timeout_s
         while True:
             counts = self._buffer.counts()
@@ -114,7 +137,9 @@ class Spool:
             return True
         self._closed = True
         try:
-            self._writer.flush()
+            # A refusal here is already a gap record, and there's no caller left to alarm.
+            with contextlib.suppress(BufferFull):
+                self.flush()
         finally:
             timeout = timeout_s if timeout_s is not None else self.config.shipper.stop_timeout_s
             stopped = self._shipper.stop(timeout_s=timeout)

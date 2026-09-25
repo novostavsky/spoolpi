@@ -8,11 +8,13 @@ are sent again after restart; that's the at-least-once contract.
 
 from __future__ import annotations
 
+import contextlib
 import enum
 import logging
 import math
 import os
 import random
+import sqlite3
 import threading
 import time
 from collections.abc import Callable, Iterable
@@ -27,6 +29,7 @@ from spool.sinks.base import AckSet, Envelope, Sink
 log = logging.getLogger("spool.shipper")
 
 _WARN_INTERVAL_S = 60.0
+_PURGE_CHUNK = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,12 +127,23 @@ class Shipper:
                 try:
                     outcome = self._ship_once(buf)
                     if time.monotonic() >= next_purge:
-                        buf.purge_acked()
+                        # Chunked so each delete transaction stays short, but repeated
+                        # until caught up: at high rates one chunk per interval falls behind.
+                        while (
+                            buf.purge_acked(_PURGE_CHUNK) == _PURGE_CHUNK
+                            and not self._stopping.is_set()
+                        ):
+                            pass
                         next_purge = time.monotonic() + self._purge_interval_s
                 except Exception:
                     # A dead shipper thread would silently stop delivery; back off and retry.
                     log.exception("shipper iteration failed")
                     outcome = _Outcome.FAILED
+                    # Rows claimed before the failure would otherwise stay inflight until
+                    # restart. Safe: this thread is the only claimer, and no send is
+                    # running (abandoned sends already released theirs).
+                    with contextlib.suppress(sqlite3.Error):
+                        buf.recover_inflight()
                 if outcome is _Outcome.PROGRESS:
                     failures = 0
                 elif outcome is _Outcome.EMPTY:

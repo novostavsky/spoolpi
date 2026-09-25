@@ -31,7 +31,7 @@ def buf(tmp_path: Path) -> Iterator[Buffer]:
 readings = st.builds(
     Reading,
     sensor_id=TEXT,
-    value=st.none() | st.floats(allow_nan=False),
+    value=st.none() | st.floats(allow_nan=False, allow_infinity=False),
     unit=st.none() | TEXT,
     mono_ns=INT64,
     wall_ns=INT64,
@@ -66,8 +66,9 @@ def test_failed_read_is_stored_and_shipped(buf: Buffer) -> None:
     assert buf.claim(1)[0].reading == failed
 
 
-def test_nan_comes_back_as_none(buf: Buffer) -> None:
-    buf.append([r(1, value=float("nan"))])
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_values_are_stored_as_failed_reads(buf: Buffer, bad: float) -> None:
+    buf.append([r(1, value=bad)])
     assert buf.claim(1)[0].reading.value is None
 
 

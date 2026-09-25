@@ -87,6 +87,9 @@ class SinkError(Exception):
 
 
 class Sink(Protocol):
+    """``send`` may be abandoned by a timeout while still running, and ``close``
+    may then be called concurrently with it: don't free what a send still uses."""
+
     def send(self, batch: Sequence[Envelope]) -> AckSet: ...
 
     def close(self) -> None: ...

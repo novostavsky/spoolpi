@@ -87,10 +87,32 @@ def test_run_stdin_delivers_everything_at_eof(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     got = [(r["sensor_id"], r["value"]) for r in delivered(tmp_path)]
     assert got == [("t1", 21.5), ("t1", None), ("t2", 3.0)]
+    assert "3 readings in, 0 discarded" in result.stderr
     assert "2 bad input lines" in result.stderr
 
     status = spool("status", "--json", str(config(tmp_path)))
     assert json.loads(status.stdout)["pending"] == 0
+
+
+def test_halt_and_alarm_refusals_are_counted_not_fatal(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    text = cfg.read_text().replace('"drop_oldest"', '"halt_and_alarm"')
+    text = text.replace("max_rows = 100000", "max_rows = 5").replace(
+        "max_rows = 10", "max_rows = 20"
+    )
+    text = text.replace("max_delay_s = 0.1", "max_delay_s = 100")
+    cfg.write_text(text)
+    stdin = "".join(json.dumps({"sensor_id": "t", "value": i}) + "\n" for i in range(50))
+    result = spool("run", str(cfg), input=stdin)
+    assert result.returncode == 0, result.stderr
+    assert "Traceback" not in result.stderr
+
+    records = delivered(tmp_path)
+    readings = {r["seq"]: r["value"] for r in records if r["type"] == "reading"}
+    gaps = {r["seq"]: r["count"] for r in records if r["type"] == "gap"}
+    assert gaps, "refused batches must ship as gap records"
+    assert len(readings) + sum(gaps.values()) == 50  # type: ignore[arg-type]
+    assert f"50 readings in, {sum(gaps.values())} discarded" in result.stderr  # type: ignore[arg-type]
 
 
 def test_sigterm_loses_nothing(tmp_path: Path) -> None:

@@ -8,11 +8,15 @@ deduplicate on (buffer_id, seq) like any Spool consumer.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import threading
 from collections.abc import Sequence
 from pathlib import Path
 
-from spool.sinks.base import AckSet, Envelope, to_wire
+from spool.sinks.base import AckSet, Envelope, SinkError, to_wire
+
+log = logging.getLogger("spool.sinks.jsonl")
 
 
 class JsonlSink:
@@ -21,6 +25,8 @@ class JsonlSink:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         existed = self.path.exists()
         self._fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        # Held for the whole write+fsync, so close() can't free the fd under a send.
+        self._lock = threading.Lock()
         if not existed:
             dir_fd = os.open(self.path.parent, os.O_RDONLY)
             try:
@@ -30,14 +36,26 @@ class JsonlSink:
 
     def send(self, batch: Sequence[Envelope]) -> AckSet:
         data = "".join(json.dumps(to_wire(e), separators=(",", ":")) + "\n" for e in batch)
-        # A crash mid-write can leave a torn last line; readers should skip one.
         view = memoryview(data.encode())
-        while view:
-            view = view[os.write(self._fd, view) :]
-        os.fsync(self._fd)
+        with self._lock:
+            if self._fd < 0:
+                raise SinkError("sink is closed")
+            # A crash mid-write can leave a torn last line; readers should skip one.
+            while view:
+                view = view[os.write(self._fd, view) :]
+            os.fsync(self._fd)
         return AckSet.all(batch)
 
     def close(self) -> None:
-        if self._fd >= 0:
-            os.close(self._fd)
-            self._fd = -1
+        # A send the shipper gave up on may still be writing. Closing its fd under
+        # it could let the OS hand the same number to another file (the buffer's,
+        # say) and the late write would land there. Better to leak the fd.
+        if not self._lock.acquire(timeout=5):
+            log.warning("a send is still writing; leaving %s open", self.path)
+            return
+        try:
+            if self._fd >= 0:
+                os.close(self._fd)
+                self._fd = -1
+        finally:
+            self._lock.release()

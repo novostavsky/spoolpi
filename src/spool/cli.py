@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import os
@@ -32,19 +33,21 @@ EXIT_CONFIG = 2
 
 class _Counters:
     def __init__(self) -> None:
-        self.written = 0
-        self.refused = 0
+        self.received = 0
         self.bad_lines = 0
+
+
+# Under halt_and_alarm any commit can be refused. The batch is already a gap
+# record, logged by the buffer and counted by the Spool, so the daemon carries on.
+_refusals = contextlib.suppress(BufferFull)
 
 
 def _write(
     spool: Spool, counters: _Counters, sensor_id: str, value: float | None, unit: str | None
 ) -> None:
-    try:
+    counters.received += 1
+    with _refusals:
         spool.write(sensor_id, value, unit)
-        counters.written += 1
-    except BufferFull:
-        counters.refused += 1  # already recorded as a gap and logged by the buffer
 
 
 def _run_fake(spool: Spool, config: Config, stop: threading.Event, counters: _Counters) -> None:
@@ -56,7 +59,8 @@ def _run_fake(spool: Spool, config: Config, stop: threading.Event, counters: _Co
         n += 1
         next_at += interval
         stop.wait(max(0.0, next_at - time.monotonic()))
-        spool.tick()
+        with _refusals:
+            spool.tick()
 
 
 class _BadLine(Exception):
@@ -111,16 +115,20 @@ def _run_stdin(spool: Spool, stop: threading.Event, counters: _Counters) -> None
             *lines, pending = (pending + chunk).split(b"\n")
             for line in lines:
                 handle(line)
-        spool.tick()
+        with _refusals:
+            spool.tick()
     handle(pending)
     sel.close()
 
 
 def _cmd_run(config: Config, _args: argparse.Namespace) -> int:
     stop = threading.Event()
+    received_signal: list[int] = []
 
     def on_signal(signum: int, _frame: object) -> None:
-        log.info("received %s, shutting down", signal.Signals(signum).name)
+        # Nothing else here: logging takes locks, and a signal landing while the
+        # main thread holds one would deadlock.
+        received_signal.append(signum)
         stop.set()
 
     signal.signal(signal.SIGTERM, on_signal)
@@ -145,14 +153,18 @@ def _cmd_run(config: Config, _args: argparse.Namespace) -> int:
                 budget = config.shipper.stop_timeout_s
                 if not spool.drain(budget):
                     log.warning(
-                        "input ended; not everything shipped in %.0f s, rest stays buffered", budget
+                        "input ended; not everything shipped in %.0f s, rest stays buffered",
+                        budget,
                     )
     finally:
+        if received_signal:
+            log.info("received %s, shutting down", signal.Signals(received_signal[0]).name)
         stopped = spool.close()
         log.info(
-            "stopped: %d written, %d refused at cap, %d bad input lines%s",
-            counters.written,
-            counters.refused,
+            "stopped: %d readings in, %d discarded at the cap (recorded as gaps), "
+            "%d bad input lines%s",
+            counters.received,
+            spool.discarded,
             counters.bad_lines,
             "" if stopped else "; shipper didn't stop in time, unacked rows resend next run",
         )
@@ -199,7 +211,8 @@ def _status(config: Config) -> dict[str, object]:
             "cap": config.retention.max_rows,
             "policy": str(config.retention.policy),
             "unshipped_gaps": b.unshipped_gaps(),
-            "discarded_in_gaps": sum(g.count for g in b.gaps()),
+            # Shipped gaps are purged on the shipper's cadence, so this undercounts history.
+            "discarded_in_buffered_gaps": sum(g.count for g in b.gaps()),
             "file_bytes": path.stat().st_size,
         }
 

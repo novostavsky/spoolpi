@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import json
+import os
 import threading
+import time
+from pathlib import Path
 
 import pytest
 
 from spool.core.reading import Reading
-from spool.sinks.base import AckSet, Envelope, Sink, SinkError
+from spool.core.retention import GapRecord
+from spool.sinks.base import AckSet, Envelope, Sink, SinkError, to_wire
+from spool.sinks.jsonl import JsonlSink
 from spool.sinks.memory import Hang, MemorySink, Partial, Raise, Reject
 
 
@@ -85,6 +91,47 @@ def test_hang_blocks_until_released_then_fails(release: str) -> None:
     t.join(timeout=2)
     assert not t.is_alive() and len(errors) == 1
     assert sink.received == []
+
+
+def test_jsonl_close_waits_for_a_running_send(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sink = JsonlSink(tmp_path / "out.jsonl")
+    real_fsync = os.fsync
+    in_send = threading.Event()
+
+    def slow_fsync(fd: int) -> None:
+        in_send.set()
+        time.sleep(0.3)
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", slow_fsync)
+    results: list[AckSet] = []
+    t = threading.Thread(target=lambda: results.append(sink.send(batch(1, 2))))
+    t.start()
+    in_send.wait(2)
+    sink.close()  # must not close the fd while the send is still fsyncing it
+    t.join(2)
+    assert results == [AckSet.of([1, 2])]
+    with pytest.raises(SinkError, match="closed"):
+        sink.send(batch(3))
+    lines = (tmp_path / "out.jsonl").read_text().splitlines()
+    assert [json.loads(line)["seq"] for line in lines] == [1, 2]
+
+
+def test_wire_form_of_a_gap() -> None:
+    gap = GapRecord("s", "boot", 1, 9, "backpressure", 4)
+    assert to_wire(Envelope("buf", 7, gap)) == {
+        "buffer_id": "buf",
+        "seq": 7,
+        "type": "gap",
+        "sensor_id": "s",
+        "boot_id": "boot",
+        "from_mono_ns": 1,
+        "to_mono_ns": 9,
+        "reason": "backpressure",
+        "count": 4,
+    }
 
 
 def test_envelope_key() -> None:
