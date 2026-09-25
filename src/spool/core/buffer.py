@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import sqlite3
 import time
@@ -464,9 +465,10 @@ class Buffer:
 class BatchWriter:
     """Groups readings into one transaction per batch.
 
-    A batch is committed once it reaches ``max_rows``, or on the first write after
-    its oldest reading is ``max_delay_s`` old. A SIGKILL loses at most the uncommitted
-    batch. Nothing flushes on a timer, so call ``flush()`` on shutdown or when idle.
+    A write commits the batch once it holds ``max_rows``, or when ``max_delay_s``
+    has passed since the last commit, so sparse writes commit immediately. A
+    SIGKILL loses at most the uncommitted batch. Nothing runs on a timer: call
+    ``flush_if_due()`` when idle between writes, and ``flush()`` on shutdown.
     """
 
     def __init__(
@@ -483,20 +485,26 @@ class BatchWriter:
         self._clock = clock
         self._pending: list[Reading] = []
         self._first_at = 0.0
+        self._last_flush = -math.inf
 
     @property
     def pending_count(self) -> int:
         return len(self._pending)
 
     def write(self, reading: Reading) -> None:
+        now = self._clock()
         if not self._pending:
-            self._first_at = self._clock()
+            self._first_at = now
         self._pending.append(reading)
-        if (
-            len(self._pending) >= self._max_rows
-            or self._clock() - self._first_at >= self._max_delay_s
-        ):
+        if len(self._pending) >= self._max_rows or now - self._last_flush >= self._max_delay_s:
             self.flush()
+
+    def flush_if_due(self) -> bool:
+        """Commit the batch if its oldest reading is ``max_delay_s`` old. True if it did."""
+        if self._pending and self._clock() - self._first_at >= self._max_delay_s:
+            self.flush()
+            return True
+        return False
 
     def flush(self) -> None:
         if not self._pending:
@@ -505,7 +513,10 @@ class BatchWriter:
             self._buffer.append(self._pending)
         except BufferFull:
             # Already recorded as a gap; retrying would store it and double-count.
+            # Still counts as a flush, so writes keep batching while the buffer is full.
             self._pending = []
+            self._last_flush = self._clock()
             raise
         # Any other error keeps the batch, and the next flush retries it.
         self._pending = []
+        self._last_flush = self._clock()

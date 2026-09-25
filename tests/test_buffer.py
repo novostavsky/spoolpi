@@ -205,28 +205,53 @@ class Ticker:
 
 def test_batch_commits_at_max_rows(buf: Buffer) -> None:
     w = BatchWriter(buf, max_rows=3, max_delay_s=100)
-    w.write(r(0))
+    w.write(r(0))  # first write: nothing committed yet, so it goes straight away
     w.write(r(1))
-    assert buf.counts()[PENDING] == 0 and w.pending_count == 2
     w.write(r(2))
-    assert buf.counts()[PENDING] == 3 and w.pending_count == 0
+    assert buf.counts()[PENDING] == 1 and w.pending_count == 2
+    w.write(r(3))
+    assert buf.counts()[PENDING] == 4 and w.pending_count == 0
 
 
-def test_batch_commits_after_max_delay(buf: Buffer) -> None:
+def test_batch_commits_once_max_delay_since_last_commit(buf: Buffer) -> None:
     clock = Ticker()
     w = BatchWriter(buf, max_rows=100, max_delay_s=1.0, clock=clock)
     w.write(r(0))
     clock.now = 0.5
     w.write(r(1))
-    assert buf.counts()[PENDING] == 0
+    assert buf.counts()[PENDING] == 1
     clock.now = 1.0
     w.write(r(2))
     assert buf.counts()[PENDING] == 3
 
 
+def test_sparse_writes_commit_immediately(buf: Buffer) -> None:
+    clock = Ticker()
+    w = BatchWriter(buf, max_rows=100, max_delay_s=1.0, clock=clock)
+    for minute in range(3):
+        clock.now = 60.0 * minute
+        w.write(r(minute))
+        assert w.pending_count == 0  # never waits a minute for the next write
+
+
+def test_flush_if_due_commits_an_aged_batch(buf: Buffer) -> None:
+    clock = Ticker()
+    w = BatchWriter(buf, max_rows=100, max_delay_s=1.0, clock=clock)
+    w.write(r(0))
+    clock.now = 0.2
+    w.write(r(1))
+    clock.now = 0.9
+    assert not w.flush_if_due()
+    clock.now = 1.2
+    assert w.flush_if_due()
+    assert buf.counts()[PENDING] == 2 and not w.flush_if_due()
+
+
 def test_failed_flush_keeps_the_batch(buf: Buffer, monkeypatch: pytest.MonkeyPatch) -> None:
     w = BatchWriter(buf, max_rows=100)
     w.write(r(0))
+    w.write(r(1))
+    assert w.pending_count == 1
 
     def disk_full(_: object) -> None:
         raise sqlite3.OperationalError("database or disk is full")
@@ -237,7 +262,7 @@ def test_failed_flush_keeps_the_batch(buf: Buffer, monkeypatch: pytest.MonkeyPat
     assert w.pending_count == 1
     monkeypatch.undo()
     w.flush()
-    assert buf.counts()[PENDING] == 1
+    assert buf.counts()[PENDING] == 2
 
 
 def test_seq_follows_write_order_across_reopen(tmp_path: Path) -> None:

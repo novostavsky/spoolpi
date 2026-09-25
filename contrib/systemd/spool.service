@@ -1,0 +1,18 @@
+[Unit]
+Description=Spool store-and-forward buffer
+# No After=network-online.target: Spool must start and buffer while offline.
+Documentation=https://pypi.org/project/spool/
+
+[Service]
+Type=exec
+ExecStart=/opt/spool/.venv/bin/spool run /etc/spool/spool.toml
+# SIGTERM makes Spool commit what's pending and finish the batch in flight.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=always
+RestartSec=2
+StateDirectory=spool
+DynamicUser=yes
+
+[Install]
+WantedBy=multi-user.target

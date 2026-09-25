@@ -1,0 +1,30 @@
+# Spool config. Relative paths are resolved against this file's directory.
+
+[buffer]
+path = "/var/lib/spool/buffer.db"
+
+[retention]
+# Required, no default: what happens when the buffer holds max_rows unshipped readings.
+#   "drop_oldest"    - discard the oldest pending readings to make room
+#   "halt_and_alarm" - refuse new readings until the uplink catches up
+# Either way the discarded readings are recorded as gap records and shipped.
+policy = "drop_oldest"
+max_rows = 1000000
+
+[batch]
+max_rows = 50       # readings per commit; a SIGKILL loses at most one batch
+max_delay_s = 1.0   # ...and at most this much time's worth of readings
+
+[shipper]
+batch_size = 100
+send_timeout_s = 10
+stop_timeout_s = 10  # keep below systemd's TimeoutStopSec
+
+[sink]
+type = "jsonl"
+path = "/var/lib/spool/out.jsonl"
+
+[source]
+# "stdin": JSON lines like {"sensor_id": "t1", "value": 21.5, "unit": "C"}
+# "fake":  a counting stream, for trying Spool out
+type = "stdin"

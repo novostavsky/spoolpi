@@ -132,15 +132,16 @@ def test_halt_refuses_whole_batch_and_records_backpressure(tmp_path: Path) -> No
 
 def test_batch_writer_drops_a_refused_batch(tmp_path: Path) -> None:
     with Buffer(tmp_path / "b.db", retention=halt(3)) as b:
-        w = BatchWriter(b, max_rows=2)
-        w.write(r(0))
+        w = BatchWriter(b, max_rows=2, max_delay_s=100)
+        w.write(r(0))  # committed alone: first write
         w.write(r(1))
-        w.write(r(2))
+        w.write(r(2))  # batch [1, 2] fills the cap of 3
+        w.write(r(3))
         with pytest.raises(BufferFull):
-            w.write(r(3))
+            w.write(r(4))  # batch [3, 4] doesn't fit
         assert w.pending_count == 0  # not retried: it's already counted in a gap
         w.flush()
-        assert stored_steps(b) == [0, 1]
+        assert stored_steps(b) == [0, 1, 2]
         assert sum(g.count for g in b.gaps()) == 2
 
 
