@@ -10,6 +10,8 @@ including resends, so tests can check loss and duplication directly.
 from __future__ import annotations
 
 import threading
+import time
+from collections import deque
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Final
@@ -47,7 +49,14 @@ class Raise:
 
 @dataclass(frozen=True, slots=True)
 class Hang:
-    """Blocks until ``release_hung()`` or ``close()``, then raises SinkError."""
+    """Blocks until ``release_hung()``, ``close()``, or ``for_s`` elapses.
+
+    Then raises SinkError, or with ``late_accept`` records the batch anyway: a
+    send the caller already gave up on that still got through.
+    """
+
+    for_s: float | None = None
+    late_accept: bool = False
 
 
 Behavior = Accept | Reject | Partial | Raise | Hang
@@ -57,9 +66,16 @@ _ACCEPT: Final = Accept()
 
 
 class MemorySink:
-    def __init__(self, script: Iterable[Behavior] = (), *, default: Behavior = _ACCEPT) -> None:
-        self._script = list(script)
+    def __init__(
+        self,
+        script: Iterable[Behavior] = (),
+        *,
+        default: Behavior = _ACCEPT,
+        latency_s: float = 0.0,
+    ) -> None:
+        self._script = deque(script)
         self._default = default
+        self._latency_s = latency_s
         self._lock = threading.Lock()
         self._unhang = threading.Event()
         self.received: list[Envelope] = []
@@ -68,8 +84,10 @@ class MemorySink:
 
     def send(self, batch: Sequence[Envelope]) -> AckSet:
         with self._lock:
-            behavior = self._script.pop(0) if self._script else self._default
+            behavior = self._script.popleft() if self._script else self._default
             self.calls += 1
+        if self._latency_s:
+            time.sleep(self._latency_s)
         match behavior:
             case Accept():
                 taken = list(batch)
@@ -80,8 +98,10 @@ class MemorySink:
             case Raise():
                 raise behavior.error
             case Hang():
-                self._unhang.wait()
-                raise SinkError("hung send released")
+                self._unhang.wait(behavior.for_s)
+                if not behavior.late_accept:
+                    raise SinkError("hung send released")
+                taken = list(batch)
         with self._lock:
             self.received.extend(taken)
         return AckSet.all(taken)
