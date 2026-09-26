@@ -43,6 +43,13 @@ class Partial:
 
 
 @dataclass(frozen=True, slots=True)
+class Poison:
+    """Rejects the envelopes ``is_poison`` matches, for good, and accepts the rest."""
+
+    is_poison: Callable[[Envelope], bool]
+
+
+@dataclass(frozen=True, slots=True)
 class Raise:
     error: Exception = field(default_factory=lambda: SinkError("scripted failure"))
 
@@ -59,7 +66,7 @@ class Hang:
     late_accept: bool = False
 
 
-Behavior = Accept | Reject | Partial | Raise | Hang
+Behavior = Accept | Reject | Partial | Poison | Raise | Hang
 
 
 _ACCEPT: Final = Accept()
@@ -79,6 +86,7 @@ class MemorySink:
         self._lock = threading.Lock()
         self._unhang = threading.Event()
         self.received: list[Envelope] = []
+        self.rejected: list[Envelope] = []
         self.calls = 0
         self.closed = False
 
@@ -95,6 +103,13 @@ class MemorySink:
                 taken = []
             case Partial():
                 taken = list(behavior.pick(batch))
+            case Poison():
+                poison = [e for e in batch if behavior.is_poison(e)]
+                taken = [e for e in batch if not behavior.is_poison(e)]
+                with self._lock:
+                    self.received.extend(taken)
+                    self.rejected.extend(poison)
+                return AckSet.of((e.seq for e in taken), (e.seq for e in poison))
             case Raise():
                 raise behavior.error
             case Hang():

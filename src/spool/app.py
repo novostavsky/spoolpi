@@ -30,6 +30,14 @@ from spool.sinks.base import Sink
 from spool.sinks.jsonl import JsonlSink
 
 
+def _is_utf8(text: str) -> bool:
+    try:
+        text.encode()
+    except UnicodeEncodeError:  # e.g. a lone surrogate from a JSON "\ud800" escape
+        return False
+    return True
+
+
 def build_sink(cfg: SinkConfig) -> Sink:
     if cfg.type == "jsonl" and cfg.path is not None:
         return JsonlSink(cfg.path)
@@ -86,6 +94,14 @@ class Spool:
         self.write_reading(Reading(sensor_id, value, unit, mono, wall, BOOT_ID, quality))
 
     def write_reading(self, reading: Reading) -> None:
+        """Raises ValueError for text SQLite can't store (not valid UTF-8)."""
+        # Caught here, not at commit: a bad string would fail every commit of its
+        # batch, and the writer would retry that batch forever.
+        texts = [("sensor_id", reading.sensor_id), ("unit", reading.unit)]
+        texts += [("qc_tests", t) for t in reading.qc_tests]
+        for name, text in texts:
+            if text is not None and not _is_utf8(text):
+                raise ValueError(f"{name} {text!r} is not valid UTF-8 text")
         with self._counting_refusals():
             self._writer.write(reading)
         if self._writer.pending_count == 0:

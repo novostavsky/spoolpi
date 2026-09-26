@@ -24,6 +24,7 @@ from pathlib import Path
 from spool.core.buffer import Buffer
 from spool.core.clock import ClockAnchor
 from spool.core.reading import Reading
+from spool.core.retention import GapRecord
 from spool.sinks.base import AckSet, Envelope, Sink
 
 log = logging.getLogger("spool.shipper")
@@ -52,6 +53,7 @@ class ShipperStats:
     timeouts: int = 0
     acked: int = 0
     released: int = 0
+    rejected: int = 0
 
 
 class _Outcome(enum.Enum):
@@ -90,6 +92,7 @@ class Shipper:
         self._stop_deadline: float | None = None
         self._abandoned: list[threading.Thread] = []
         self._thread: threading.Thread | None = None
+        self._last_rejection_log = -math.inf
         self.stats = ShipperStats()
 
     def start(self) -> None:
@@ -169,6 +172,7 @@ class Shipper:
                 [(g.id, Envelope(buf.buffer_id, g.seq, g.gap)) for g in gaps],
                 buf.ack_gaps,
                 buf.release_gaps,
+                buf.reject_gaps,
             )
         claimed = buf.claim(self._batch_size)
         if not claimed:
@@ -177,6 +181,7 @@ class Shipper:
             [(s.id, Envelope(buf.buffer_id, s.seq, self._correct(s.reading))) for s in claimed],
             buf.ack,
             buf.release,
+            buf.reject,
         )
 
     def _ship(
@@ -184,18 +189,45 @@ class Shipper:
         rows: list[tuple[int, Envelope]],
         ack: Callable[[Iterable[int]], int],
         release: Callable[[Iterable[int]], int],
+        reject: Callable[[Iterable[int]], int],
     ) -> _Outcome:
         id_by_seq = {env.seq: row_id for row_id, env in rows}
         batch = [env for _, env in rows]
         acks = self._send(batch)
         # Seqs the sink claims but we never sent are ignored.
         accepted = {q for q in acks.accepted if q in id_by_seq} if acks is not None else set()
-        rest = [row_id for seq, row_id in id_by_seq.items() if seq not in accepted]
+        rejected = {q for q in acks.rejected if q in id_by_seq} if acks is not None else set()
+        if len(batch) > 1 and len(rejected) == len(batch):
+            # Every record refused at once looks systemic (schema, auth, endpoint),
+            # not poison: keep the data and treat it as a failed send.
+            self._log_rejection(
+                "sink rejected all %d records of a batch; treating it as a failed send, "
+                "not dropping data (a sink should raise for systemic errors)",
+                len(batch),
+            )
+            rejected = set()
+        rest = [row_id for seq, row_id in id_by_seq.items() if seq not in accepted | rejected]
         if accepted:
             self.stats.acked += ack(id_by_seq[seq] for seq in accepted)
+        if rejected:
+            n = reject(id_by_seq[seq] for seq in rejected)
+            self.stats.rejected += n
+            kind = "gap records" if isinstance(batch[0].payload, GapRecord) else "readings"
+            self._log_rejection(
+                "sink permanently rejected %d %s; quarantined in the buffer%s",
+                n,
+                kind,
+                "" if kind == "readings" else ", and the sink's accounting is short by them",
+            )
         if rest:
             self.stats.released += release(rest)
-        return _Outcome.PROGRESS if accepted else _Outcome.FAILED
+        return _Outcome.PROGRESS if accepted or rejected else _Outcome.FAILED
+
+    def _log_rejection(self, message: str, *args: object) -> None:
+        now = time.monotonic()
+        if now - self._last_rejection_log >= _WARN_INTERVAL_S:
+            log.error(message + " (repeats suppressed for 60 s)", *args)
+            self._last_rejection_log = now
 
     def _correct(self, reading: Reading) -> Reading:
         return self._anchor.correct(reading) if self._anchor is not None else reading

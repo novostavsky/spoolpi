@@ -1,9 +1,13 @@
 """The sink contract.
 
-A sink receives a batch of envelopes and reports which ones it durably accepted.
-Anything not in the returned ``AckSet`` is resent later, and so is the whole
-batch if ``send`` raises. Delivery is at-least-once, so a sink (or whatever
-sits behind it) must deduplicate on ``(buffer_id, seq)``.
+A sink receives a batch of envelopes and reports which ones it durably accepted,
+and which it refuses for good. Anything in neither set is resent later, and so
+is the whole batch if ``send`` raises. Delivery is at-least-once, so a sink (or
+whatever sits behind it) must deduplicate on ``(buffer_id, seq)``.
+
+``rejected`` is for a record that can never succeed, such as one a server fails
+to validate. Anything systemic (auth, schema, endpoint, network) must raise
+instead: rejected rows are quarantined and recorded as a gap, not resent.
 """
 
 from __future__ import annotations
@@ -31,13 +35,21 @@ class Envelope:
 
 @dataclass(frozen=True, slots=True)
 class AckSet:
-    """The seqs of the envelopes a sink durably accepted; any subset of the batch."""
+    """Seqs the sink durably accepted, and seqs it refuses permanently.
+
+    Each may be any subset of the batch; the rest is retried.
+    """
 
     accepted: frozenset[int] = frozenset()
+    rejected: frozenset[int] = frozenset()
+
+    def __post_init__(self) -> None:
+        if both := self.accepted & self.rejected:
+            raise ValueError(f"seqs both accepted and rejected: {sorted(both)[:5]}")
 
     @classmethod
-    def of(cls, seqs: Iterable[int]) -> AckSet:
-        return cls(frozenset(seqs))
+    def of(cls, accepted: Iterable[int], rejected: Iterable[int] = ()) -> AckSet:
+        return cls(frozenset(accepted), frozenset(rejected))
 
     @classmethod
     def all(cls, batch: Sequence[Envelope]) -> AckSet:
@@ -48,9 +60,11 @@ class AckSet:
         return cls()
 
     def __contains__(self, seq: object) -> bool:
+        """Whether ``seq`` was accepted."""
         return seq in self.accepted
 
     def __len__(self) -> int:
+        """How many were accepted."""
         return len(self.accepted)
 
 

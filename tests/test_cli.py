@@ -80,6 +80,7 @@ def test_run_stdin_delivers_everything_at_eof(tmp_path: Path) -> None:
         {"sensor_id": "t1", "value": None},  # a failed read still ships
         "this is not json",
         '{"sensor_id": "t1", "value": 1' + "0" * 400 + "}",  # too big for a float
+        '{"sensor_id": "\\ud800", "value": 1}',  # lone surrogate: can't be stored as text
         {"sensor_id": "t2", "value": 3},
     ]
     stdin = "\n".join(x if isinstance(x, str) else json.dumps(x) for x in lines)  # no final newline
@@ -88,7 +89,7 @@ def test_run_stdin_delivers_everything_at_eof(tmp_path: Path) -> None:
     got = [(r["sensor_id"], r["value"]) for r in delivered(tmp_path)]
     assert got == [("t1", 21.5), ("t1", None), ("t2", 3.0)]
     assert "3 readings in, 0 discarded" in result.stderr
-    assert "2 bad input lines" in result.stderr
+    assert "3 bad input lines" in result.stderr
 
     status = spool("status", "--json", str(config(tmp_path)))
     assert json.loads(status.stdout)["pending"] == 0

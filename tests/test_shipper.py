@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from spool.core.buffer import ACKED, INFLIGHT, PENDING, BatchWriter, Buffer
+from spool.core.buffer import ACKED, INFLIGHT, PENDING, REJECTED, BatchWriter, Buffer
 from spool.core.clock import ClockAnchor
 from spool.core.reading import TS_CORRECTED, Reading
 from spool.core.shipper import Backoff, Shipper
@@ -158,7 +158,7 @@ def test_stop_during_hang_returns_in_time_and_releases_rows(db: Path) -> None:
     assert s.stop(timeout_s=1.0)
     assert time.monotonic() - t0 < 1.0
     with Buffer(db) as b:
-        assert b.counts() == {PENDING: 10, INFLIGHT: 0, ACKED: 0}
+        assert b.counts() == {PENDING: 10, INFLIGHT: 0, ACKED: 0, REJECTED: 0}
 
 
 def test_stop_lets_the_batch_in_flight_finish(db: Path) -> None:

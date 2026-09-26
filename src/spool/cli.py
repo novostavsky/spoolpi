@@ -50,6 +50,12 @@ def _write(
         spool.write(sensor_id, value, unit)
 
 
+def _note_bad_line(counters: _Counters, problem: object) -> None:
+    counters.bad_lines += 1
+    if counters.bad_lines == 1:
+        log.warning("skipping bad input line (%s); further ones are only counted", problem)
+
+
 def _run_fake(spool: Spool, config: Config, stop: threading.Event, counters: _Counters) -> None:
     interval = 1.0 / config.source.rate_hz
     n = 0
@@ -81,6 +87,12 @@ def _parse_line(line: bytes) -> tuple[str, float | None, str | None]:
         raise _BadLine("value must be a number or null")
     if unit is not None and not isinstance(unit, str):
         raise _BadLine("unit must be a string or null")
+    for name, text in (("sensor_id", sensor_id), ("unit", unit)):
+        try:
+            if text is not None:
+                text.encode()
+        except UnicodeEncodeError as e:  # a lone surrogate, from a "\ud800" escape
+            raise _BadLine(f"{name} is not valid UTF-8 text") from e
     try:
         return sensor_id, None if value is None else float(value), unit
     except OverflowError as e:  # a JSON integer too big for a float
@@ -100,9 +112,7 @@ def _run_stdin(spool: Spool, stop: threading.Event, counters: _Counters) -> None
         try:
             sensor_id, value, unit = _parse_line(line)
         except _BadLine as e:
-            counters.bad_lines += 1
-            if counters.bad_lines == 1:
-                log.warning("skipping bad input line (%s); further ones are only counted", e)
+            _note_bad_line(counters, e)
             return
         _write(spool, counters, sensor_id, value, unit)
 

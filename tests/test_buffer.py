@@ -10,7 +10,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from spool.core import buffer as buffer_mod
-from spool.core.buffer import ACKED, INFLIGHT, PENDING, BatchWriter, Buffer
+from spool.core.buffer import ACKED, INFLIGHT, PENDING, REJECTED, BatchWriter, Buffer
 from spool.core.reading import TS_CORRECTED, Reading
 
 INT64 = st.integers(-(2**63), 2**63 - 1)
@@ -78,7 +78,7 @@ def test_claim_is_ordered_and_exclusive(buf: Buffer) -> None:
     second = buf.claim(4)
     assert [s.reading.mono_ns for s in first] == [0, 1, 2, 3]
     assert [s.reading.mono_ns for s in second] == [4, 5, 6, 7]
-    assert buf.counts() == {PENDING: 2, INFLIGHT: 8, ACKED: 0}
+    assert buf.counts() == {PENDING: 2, INFLIGHT: 8, ACKED: 0, REJECTED: 0}
 
 
 def test_release_puts_rows_back_in_original_order(buf: Buffer) -> None:
@@ -94,7 +94,7 @@ def test_ack_only_moves_inflight_rows(buf: Buffer) -> None:
     claimed = buf.claim(2)
     assert buf.ack([claimed[0].id, claimed[0].id + 99]) == 1
     assert buf.ack([claimed[0].id]) == 0  # already acked
-    assert buf.counts() == {PENDING: 1, INFLIGHT: 1, ACKED: 1}
+    assert buf.counts() == {PENDING: 1, INFLIGHT: 1, ACKED: 1, REJECTED: 0}
 
 
 def test_recover_inflight(tmp_path: Path) -> None:
@@ -112,9 +112,9 @@ def test_purge_removes_only_acked_and_respects_limit(buf: Buffer) -> None:
     claimed = buf.claim(6)
     buf.ack(s.id for s in claimed)
     assert buf.purge_acked(limit=4) == 4
-    assert buf.counts() == {PENDING: 4, INFLIGHT: 0, ACKED: 2}
+    assert buf.counts() == {PENDING: 4, INFLIGHT: 0, ACKED: 2, REJECTED: 0}
     assert buf.purge_acked() == 2
-    assert buf.counts() == {PENDING: 4, INFLIGHT: 0, ACKED: 0}
+    assert buf.counts() == {PENDING: 4, INFLIGHT: 0, ACKED: 0, REJECTED: 0}
 
 
 def test_claim_leaves_no_transaction_open(tmp_path: Path, buf: Buffer) -> None:
@@ -148,7 +148,7 @@ def test_failed_append_rolls_back_whole_batch(buf: Buffer) -> None:
     with pytest.raises(OverflowError):
         buf.append([r(1), bad])
     assert not buf._conn.in_transaction
-    assert buf.counts() == {PENDING: 0, INFLIGHT: 0, ACKED: 0}
+    assert buf.counts() == {PENDING: 0, INFLIGHT: 0, ACKED: 0, REJECTED: 0}
 
 
 def test_rejects_unknown_schema_version(tmp_path: Path) -> None:

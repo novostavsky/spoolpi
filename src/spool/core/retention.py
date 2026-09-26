@@ -15,6 +15,7 @@ from spool.core.reading import Reading
 
 REASON_DROP_OLDEST: Final = "retention:drop_oldest"
 REASON_BACKPRESSURE: Final = "backpressure"
+REASON_REJECTED: Final = "rejected:sink"  # the sink refused these for good; kept in quarantine
 
 
 class Policy(enum.StrEnum):

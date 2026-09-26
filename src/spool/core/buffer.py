@@ -32,6 +32,7 @@ from spool.core.reading import Reading
 from spool.core.retention import (
     REASON_BACKPRESSURE,
     REASON_DROP_OLDEST,
+    REASON_REJECTED,
     BufferFull,
     GapRecord,
     Policy,
@@ -44,6 +45,12 @@ log = logging.getLogger("spool.buffer")
 PENDING: Final = 0
 INFLIGHT: Final = 1
 ACKED: Final = 2
+REJECTED: Final = 3  # refused for good by the sink: never resent, kept for inspection
+
+# Quarantined rows kept for inspection; older ones are trimmed (they're already
+# counted in gap records). Bounds disk if a sink wrongly rejects a lot.
+QUARANTINE_KEEP: Final = 10_000
+_IN_CHUNK: Final = 500  # ids per `IN (...)` query, well under SQLite's parameter limit
 
 SCHEMA_VERSION: Final = 3
 
@@ -365,6 +372,33 @@ class Buffer:
         with self._write() as c:
             return self._transition(c, "readings", ids, INFLIGHT, PENDING)
 
+    def reject(self, ids: Iterable[int]) -> int:
+        """Quarantine inflight rows the sink refused for good, and record them as a gap.
+
+        One transaction, so the gap count always matches the quarantined rows.
+        """
+        id_list = list(ids)
+        with self._write() as c:
+            n = 0
+            for i in range(0, len(id_list), _IN_CHUNK):
+                chunk = id_list[i : i + _IN_CHUNK]
+                marks = ",".join("?" * len(chunk))
+                groups = c.execute(
+                    "SELECT sensor_id, boot_id, min(mono_ns), max(mono_ns), count(*) "
+                    f"FROM readings WHERE state = ? AND id IN ({marks}) "
+                    "GROUP BY sensor_id, boot_id ORDER BY min(id)",
+                    (INFLIGHT, *chunk),
+                ).fetchall()
+                _record_gaps(
+                    c, (GapRecord(s, b, lo, hi, REASON_REJECTED, k) for s, b, lo, hi, k in groups)
+                )
+                n += c.execute(
+                    f"UPDATE readings SET state = ? WHERE state = ? AND id IN ({marks})",
+                    (REJECTED, INFLIGHT, *chunk),
+                ).rowcount
+            _add_unacked(c, -n)
+            return n
+
     @staticmethod
     def _transition(
         c: sqlite3.Connection, table: str, ids: Iterable[int], src: int, dst: int
@@ -409,6 +443,12 @@ class Buffer:
         with self._write() as c:
             return self._transition(c, "gaps", ids, INFLIGHT, PENDING)
 
+    def reject_gaps(self, ids: Iterable[int]) -> int:
+        """Quarantine gap records the sink refused. There is no gap-of-a-gap: the
+        caller must log it, because the sink's accounting is now short by their counts."""
+        with self._write() as c:
+            return self._transition(c, "gaps", ids, INFLIGHT, REJECTED)
+
     # --- maintenance ---------------------------------------------------------
 
     def recover_inflight(self) -> int:
@@ -421,13 +461,20 @@ class Buffer:
             return n
 
     def purge_acked(self, limit: int = 10_000) -> int:
-        """Delete up to ``limit`` of the oldest acked readings, and all acked gaps.
+        """Delete up to ``limit`` of the oldest acked readings and all acked gaps,
+        and trim quarantine to its newest ``QUARANTINE_KEEP`` rows.
 
         Deliberately no VACUUM: on an SD card it rewrites the whole file. Freed
         pages are reused, so the file size plateaus instead of shrinking.
         """
         with self._write() as c:
             c.execute("DELETE FROM gaps WHERE state = ?", (ACKED,))
+            for table in ("readings", "gaps"):
+                c.execute(
+                    f"DELETE FROM {table} WHERE state = ? AND id <= (SELECT id FROM {table} "
+                    "WHERE state = ? ORDER BY id DESC LIMIT 1 OFFSET ?)",
+                    (REJECTED, REJECTED, QUARANTINE_KEEP),
+                )
             return c.execute(
                 "DELETE FROM readings WHERE id IN "
                 "(SELECT id FROM readings WHERE state = ? ORDER BY id LIMIT ?)",
@@ -437,13 +484,15 @@ class Buffer:
     def counts(self) -> dict[int, int]:
         rows = self._conn.execute("SELECT state, count(*) FROM readings GROUP BY state")
         found = {int(state): int(n) for state, n in rows}
-        return {state: found.get(state, 0) for state in (PENDING, INFLIGHT, ACKED)}
+        return {state: found.get(state, 0) for state in (PENDING, INFLIGHT, ACKED, REJECTED)}
 
     def unacked(self) -> int:
         return self._unacked(self._conn)
 
     def unshipped_gaps(self) -> int:
-        row = self._conn.execute("SELECT count(*) FROM gaps WHERE state != ?", (ACKED,))
+        row = self._conn.execute(
+            "SELECT count(*) FROM gaps WHERE state IN (?, ?)", (PENDING, INFLIGHT)
+        )
         return int(row.fetchone()[0])
 
     def gaps(self) -> list[GapRecord]:

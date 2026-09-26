@@ -14,8 +14,9 @@ from pathlib import Path
 import pytest
 
 from spool.core.buffer import BatchWriter, Buffer
+from spool.core.reading import Reading
 from spool.core.shipper import Backoff, Shipper
-from spool.sinks.memory import Accept, Behavior, Hang, MemorySink, Partial, Raise, Reject
+from spool.sinks.memory import Accept, Behavior, Hang, MemorySink, Partial, Poison, Raise, Reject
 from tests.shipping import FAST_BACKOFF, assert_invariants, drain, fill, reading
 
 
@@ -61,6 +62,32 @@ def test_invariants_under_chaos_with_concurrent_writer(tmp_path: Path, seed: int
             drain(db, timeout_s=60)
         finally:
             shipper.stop(timeout_s=2)
+    assert_invariants(sink, n)
+
+
+def test_invariants_with_poison_rows_and_a_concurrent_writer(tmp_path: Path) -> None:
+    db = tmp_path / "b.db"
+    n = 2000
+    rng = random.Random(5)
+    # Consistent per record, like a real validating server: the same rows always fail.
+    poison = Poison(lambda e: isinstance(e.payload, Reading) and e.payload.value % 97 == 0)
+    flaky: list[Behavior] = [rng.choice([poison, Raise(), Reject()]) for _ in range(100)]
+    sink = MemorySink(flaky, default=poison)
+    with Buffer(db) as buf:
+        shipper = Shipper(db, sink, batch_size=50, backoff=FAST_BACKOFF, poll_interval_s=0.02)
+        shipper.start()
+        try:
+            writer = BatchWriter(buf, max_rows=20)
+            for i in range(n):
+                writer.write(reading(i))
+                if writer.pending_count == 0:
+                    shipper.notify()
+            writer.flush()
+            shipper.notify()
+            drain(db, timeout_s=60)
+        finally:
+            shipper.stop(timeout_s=2)
+    assert shipper.stats.rejected == len(range(0, n, 97))
     assert_invariants(sink, n)
 
 

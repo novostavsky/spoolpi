@@ -153,6 +153,7 @@ ops = st.lists(
         st.tuples(st.just("claim"), st.integers(1, 12)),
         st.tuples(st.just("ack"), st.integers(0, 12)),
         st.tuples(st.just("release"), st.integers(0, 12)),
+        st.tuples(st.just("reject"), st.integers(0, 12)),
         st.tuples(st.just("purge"), st.just(0)),
         st.tuples(st.just("recover"), st.just(0)),
     ),
@@ -184,6 +185,9 @@ def test_acceptance_gap_counts_exactly_match_discarded_rows(
                 inflight = inflight[k:]
             elif op == "release":
                 b.release(inflight[:k])
+                inflight = inflight[k:]
+            elif op == "reject":
+                b.reject(inflight[:k])  # quarantined rows are accounted for by their gap
                 inflight = inflight[k:]
             elif op == "purge":
                 b.purge_acked()
