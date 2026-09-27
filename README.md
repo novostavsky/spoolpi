@@ -2,10 +2,18 @@
 
 Crash-safe store-and-forward buffering for edge sensor data, with no runtime dependencies.
 
-The naive approach, SQLite plus an immediate HTTP POST, silently duplicated **13.1%** of
-readings across 100 SIGKILL cycles (see [`docs/motivation.md`](docs/motivation.md)). Spool
-keeps readings in a SQLite WAL buffer and ships them with at-least-once delivery. Every record
-carries a `(buffer_id, seq)` key, so downstream deduplication is exact.
+We killed a sensor-logging process with SIGKILL 300 times (3 seeds × 100) while it wrote and
+shipped readings:
+
+| | Lost | Duplicates the receiver can't detect |
+|---|---|---|
+| The usual approach (SQLite + immediate HTTP POST) | 0 | **11.5%** of readings |
+| Spool | **0** | **0** |
+
+Spool keeps readings in a SQLite WAL buffer and ships them with at-least-once delivery. The
+0.23% of records it re-sent after a crash all carried the same `(buffer_id, seq)` key, so
+removing them is mechanical. Method and caveats are in
+[`docs/motivation.md`](docs/motivation.md).
 
 - A SIGKILL loses at most one uncommitted batch (default: 50 readings or 1 s). This is verified
   by a 1,000-cycle crash test.

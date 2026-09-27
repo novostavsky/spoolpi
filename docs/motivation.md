@@ -54,6 +54,47 @@ defect. That's the number the rest of the project is measured against — the id
 design (M3/M5) exists specifically to make "committed" and "delivered" two explicitly tracked
 states instead of one inferred from the other.
 
+## Rerun with Spool (2026-09-27)
+
+The same experiment, with Spool in place of the naive loop:
+- `bench/spool_spike.py` runs the same fake sensor and the same 10 ms cadence, with the same
+  resume rule (continue from the last committed step + 1). It commits in batches of 15 like the
+  naive spike, and ships through Spool's HTTP sink to a receiver that stays up across the kills.
+- `bench/run_spool_spike_crash_test.py` uses the same kill schedule: 100 SIGKILLs at seeded
+  uniform 0.05–1.5 s. After the last kill, one uninterrupted `--drain` run lets everything
+  committed reach the receiver.
+- The naive spike was re-run on the same day, machine and seeds.
+
+| Seed | Naive: committed | Naive: duplicated | Spool: committed | Spool: redelivered (same key) | Spool: duplicates after dedupe |
+|---|---|---|---|---|---|
+| 0 | 6,496 | 706 (10.9%) | 7,253 | 15 | **0** |
+| 1 | 5,656 | 717 (12.7%) | 6,201 | 31 | **0** |
+| 2 | 6,166 | 686 (11.1%) | 6,819 | 1 | **0** |
+| **Total** | **18,318** | **2,109 (11.5%)** | **20,273** | **47 (0.23%)** | **0** |
+
+Neither design lost a committed reading or corrupted its database in any run. (The first
+Week 0 run above measured 13.1% for the naive spike; today's three seeds put it at 10.9–12.7%.)
+
+The difference is in what reaches the receiver:
+
+- **Naive:** 11.5% of readings arrived twice, and nothing in the payload tells the receiver
+  that the second copy is a repeat. The synthetic stream happens to count 0, 1, 2…, but a real
+  temperature reading has no such key. These duplicates are *silent*.
+- **Spool:** 0.23% of records arrived more than once. That's at-least-once delivery doing its
+  job: the process died after the receiver stored a batch but before the acknowledgement was
+  recorded. Every repeat carries the same `(buffer_id, seq)` key, so a consumer removes it
+  mechanically (the reference consumer's `ON CONFLICT DO NOTHING`). After that, **0
+  duplicates and 0 losses**. No reading was ever shipped under two different keys, which is
+  the kind of duplicate no consumer could detect.
+
+Spool's redelivery rate depends on how often a kill lands between "the receiver has it" and
+"the ack is recorded". Here that window is small, because the receiver is local. A slow uplink
+widens it, and raises the redelivery count, but never the post-dedupe count.
+
+What neither design can do is keep readings that were sampled but not yet committed when the
+process died. In both, that window is at most one commit batch (15 readings here). Spool
+documents it as its loss bound, and the M2 crash test checks it across 1,000 kills.
+
 ## Caveats / not yet measured
 
 Two Week 0 outputs from the plan are **not** in this report and need real Raspberry Pi
