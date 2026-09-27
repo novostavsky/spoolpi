@@ -62,6 +62,29 @@ validation. Spool quarantines it and reports it as a gap. Anything systemic shou
 error without per-record detail. Rejecting every record of a batch is treated as an outage
 anyway, not as poison.
 
+### Reference consumer: MQTT → Postgres
+
+```sh
+uv pip install 'spool[consumer]'
+export SPOOL_CONSUMER_DSN=postgresql://spool@db/telemetry
+python -m spool.consumer --broker broker.example.org:1883 --init-schema
+```
+
+It creates the tables in
+[`src/spool/consumer/schema.sql`](src/spool/consumer/schema.sql): `spool_readings`, `spool_gaps`
+and `spool_dead_letters`, each keyed by `(buffer_id, seq)`. It stores each batch in one
+transaction and acknowledges messages to the broker only after the commit, so a crash means
+redelivery, never loss, and the key turns redelivery into a no-op.
+
+- **Persistent session:** the consumer subscribes with one, so the broker holds messages while
+  the consumer is down. Keep `--client-id` stable.
+- **Bad messages:** a message that can never be stored goes to `spool_dead_letters` instead of
+  blocking the stream.
+- **Broker in-flight limit:** manual acknowledgement means the broker's limit caps the batch
+  size. For mosquitto, raise `max_inflight_messages` (default 20) to around `--batch-size`.
+- **Querying:** order a device's readings by `seq`, not by time, and treat `ts` as trustworthy
+  only where `ts_quality > 0`.
+
 ## Development
 
 ```sh

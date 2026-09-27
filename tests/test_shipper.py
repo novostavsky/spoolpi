@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import random
+import sqlite3
 import time
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 import pytest
 
+from spool.core import shipper as shipper_mod
 from spool.core.buffer import ACKED, INFLIGHT, PENDING, REJECTED, BatchWriter, Buffer
 from spool.core.clock import ClockAnchor
 from spool.core.reading import TS_CORRECTED, Reading
@@ -202,6 +204,28 @@ def test_hung_sends_are_capped(db: Path, running: list[Shipper]) -> None:
     s = ship(db, sink, running, send_timeout_s=0.05, max_abandoned_sends=2)
     wait_for(lambda: s.stats.failed_sends >= 4)
     assert sink.calls == 2
+
+
+def test_a_failed_buffer_open_is_retried_not_fatal(
+    db: Path, running: list[Shipper], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: an exception opening the buffer ended the shipper thread, and with
+    # it all delivery, without a trace.
+    fill(db, 20)
+    real = shipper_mod.Buffer
+    calls = {"n": 0}
+
+    def flaky_open(path: Path) -> Buffer:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real(path)
+
+    monkeypatch.setattr(shipper_mod, "Buffer", flaky_open)
+    sink = MemorySink()
+    s = ship(db, sink, running)
+    wait_for(lambda: s.stats.acked == 20)  # acked is counted after the sink returns
+    assert calls["n"] == 2 and len(sink.received) == 20
 
 
 def test_acked_rows_are_purged_on_cadence(db: Path, running: list[Shipper]) -> None:

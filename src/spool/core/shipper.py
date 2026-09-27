@@ -120,7 +120,9 @@ class Shipper:
         return stopped
 
     def _run(self) -> None:
-        buf = Buffer(self._db_path)
+        # Opened inside the loop: a failed open (say, a locked brand-new file) must
+        # be retried like anything else, not end the thread and with it all delivery.
+        buf: Buffer | None = None
         failures = 0
         last_warning = -math.inf
         next_purge = time.monotonic() + self._purge_interval_s
@@ -128,6 +130,8 @@ class Shipper:
             while not self._stopping.is_set():
                 self._wake.clear()
                 try:
+                    if buf is None:
+                        buf = Buffer(self._db_path)
                     outcome = self._ship_once(buf)
                     if time.monotonic() >= next_purge:
                         # Chunked so each delete transaction stays short, but repeated
@@ -145,8 +149,9 @@ class Shipper:
                     # Rows claimed before the failure would otherwise stay inflight until
                     # restart. Safe: this thread is the only claimer, and no send is
                     # running (abandoned sends already released theirs).
-                    with contextlib.suppress(sqlite3.Error):
-                        buf.recover_inflight()
+                    if buf is not None:
+                        with contextlib.suppress(sqlite3.Error):
+                            buf.recover_inflight()
                 if outcome is _Outcome.PROGRESS:
                     failures = 0
                 elif outcome is _Outcome.EMPTY:
@@ -162,7 +167,8 @@ class Shipper:
                     # Only stop cuts a backoff short; new writes must not.
                     self._stopping.wait(self._backoff.delay(failures, self._rng))
         finally:
-            buf.close()
+            if buf is not None:
+                buf.close()
 
     def _ship_once(self, buf: Buffer) -> _Outcome:
         # Gaps go first: they're rare, small, and what an auditor looks for.

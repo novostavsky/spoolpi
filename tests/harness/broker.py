@@ -34,7 +34,8 @@ def free_port() -> int:
 
 
 class Broker:
-    def __init__(self, workdir: Path, *, acl: str | None = None) -> None:
+    def __init__(self, workdir: Path, *, acl: str | None = None, persistent: bool = False) -> None:
+        """``persistent``: sessions and queued messages survive a stop/start."""
         found = find_mosquitto()
         if found is None:
             raise RuntimeError("mosquitto not available")
@@ -44,9 +45,12 @@ class Broker:
         conf = [
             f"listener {self.port} 127.0.0.1",
             "allow_anonymous true",
-            "persistence false",
             f"log_dest file {self._log}",
         ]
+        if persistent:
+            conf += ["persistence true", f"persistence_location {workdir}/"]
+        else:
+            conf.append("persistence false")
         if acl is not None:
             acl_file = workdir / "acl"
             acl_file.write_text(acl)

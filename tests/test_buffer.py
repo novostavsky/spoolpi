@@ -128,6 +128,32 @@ def test_claim_leaves_no_transaction_open(tmp_path: Path, buf: Buffer) -> None:
     assert busy == 0
 
 
+def test_many_handles_can_open_a_brand_new_database_at_once(tmp_path: Path) -> None:
+    # Regression: racing WAL switches on a new file raised "database is locked".
+    for attempt in range(5):
+        db = tmp_path / f"race{attempt}.db"
+        gate = threading.Barrier(8)
+        errors: list[BaseException] = []
+
+        def open_it(
+            path: Path = db,
+            barrier: threading.Barrier = gate,
+            failures: list[BaseException] = errors,
+        ) -> None:
+            barrier.wait()
+            try:
+                Buffer(path).close()
+            except sqlite3.Error as e:
+                failures.append(e)
+
+        threads = [threading.Thread(target=open_it) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert errors == []
+
+
 def test_handle_refuses_use_from_another_thread(buf: Buffer) -> None:
     refused: list[sqlite3.ProgrammingError] = []
 

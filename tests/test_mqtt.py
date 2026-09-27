@@ -15,6 +15,7 @@ pytest.importorskip("paho.mqtt")
 
 import paho.mqtt.client as mqtt
 from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.properties import Properties
 from paho.mqtt.reasoncodes import ReasonCode
 
 from spool.core.buffer import REJECTED, BatchWriter, Buffer
@@ -206,15 +207,26 @@ needs_broker = pytest.mark.skipif(find_mosquitto() is None, reason="mosquitto no
 
 
 class Subscriber:
-    def __init__(self, port: int) -> None:
+    def __init__(self, port: int, *, session: str | None = None) -> None:
+        """``session``: a persistent MQTT 5 session under that client id, so the broker
+        queues for us while we're disconnected (e.g. across a broker restart)."""
         self.records: list[dict[str, Any]] = []
         self._lock = threading.Lock()
         ready = threading.Event()
-        self.client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+        self.client = mqtt.Client(
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+            client_id=session or "",
+            protocol=mqtt.MQTTv5,
+        )
         self.client.on_connect = lambda c, *_: c.subscribe("spool/#", qos=1)
         self.client.on_subscribe = lambda *_: ready.set()
         self.client.on_message = self._on_message
-        self.client.connect("127.0.0.1", port)
+        self.client.reconnect_delay_set(min_delay=1, max_delay=2)
+        props = None
+        if session is not None:
+            props = Properties(PacketTypes.CONNECT)
+            props.SessionExpiryInterval = 3600
+        self.client.connect("127.0.0.1", port, clean_start=session is None, properties=props)
         self.client.loop_start()
         assert ready.wait(5), "subscriber didn't subscribe"
 
@@ -272,35 +284,31 @@ def test_end_to_end_through_a_real_broker(tmp_path: Path, broker: Broker) -> Non
 
 
 @needs_broker
-def test_broker_outage_loses_nothing(tmp_path: Path, broker: Broker) -> None:
+def test_broker_outage_loses_nothing(tmp_path: Path) -> None:
     db = tmp_path / "b.db"
     n = 400
-    sub = Subscriber(broker.port)
-    shipper = run_shipper(db, broker.port, connect_timeout_s=0.5, ack_timeout_s=1)
-    seen: dict[int, float] = {}
-    try:
-        with Buffer(db) as buf:
-            w = BatchWriter(buf, max_rows=10, max_delay_s=0.05)
-            for i in range(n):
-                w.write(reading(i))
-                if i == 100:
-                    broker.stop()  # uplink gone while writing continues
-                    time.sleep(0.3)  # let messages the broker already routed arrive
-                    seen.update(sub.readings())
-                    sub.close()
-                if i == 300:
-                    broker.start()
-                    # Subscribes well before the shipper's reconnect (paho waits >= 1 s).
-                    sub = Subscriber(broker.port)
-                time.sleep(0.002)
-            w.flush()
-        drain(db, timeout_s=60)
-        wait_until(lambda: len(seen.keys() | sub.readings().keys()) >= n)
-    finally:
-        shipper.stop(timeout_s=5)
-        seen.update(sub.readings())
-        sub.close()
-    assert sorted(seen.values()) == [float(i) for i in range(n)]
+    # The broker persists sessions and the subscriber keeps one, so whatever the broker
+    # acked is delivered to it eventually, however the restarts interleave.
+    with Broker(tmp_path, persistent=True) as broker:
+        sub = Subscriber(broker.port, session="outage-subscriber")
+        shipper = run_shipper(db, broker.port, connect_timeout_s=0.5, ack_timeout_s=1)
+        try:
+            with Buffer(db) as buf:
+                w = BatchWriter(buf, max_rows=10, max_delay_s=0.05)
+                for i in range(n):
+                    w.write(reading(i))
+                    if i == 100:
+                        broker.stop()  # uplink gone while writing continues
+                    if i == 300:
+                        broker.start()
+                    time.sleep(0.002)
+                w.flush()
+            drain(db, timeout_s=60)
+            wait_until(lambda: len(sub.readings()) >= n, timeout_s=30)
+        finally:
+            shipper.stop(timeout_s=5)
+            sub.close()
+    assert sorted(sub.readings().values()) == [float(i) for i in range(n)]
 
 
 @needs_broker

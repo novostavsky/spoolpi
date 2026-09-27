@@ -155,10 +155,24 @@ def _fsync_dir(path: Path) -> None:
         os.close(fd)
 
 
+def _enable_wal(conn: sqlite3.Connection, timeout_s: float = 5.0) -> str:
+    # Switching a new file to WAL needs an exclusive lock, and SQLite may report
+    # "locked" at once, without its busy handler, when two connections race to do
+    # it. Once the file is in WAL mode (which persists) this is a plain read.
+    deadline = time.monotonic() + timeout_s
+    while True:
+        try:
+            return str(conn.execute("PRAGMA journal_mode = WAL").fetchone()[0])
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
+
 def _connect(path: Path, wal_autocheckpoint: int) -> sqlite3.Connection:
     # isolation_level=None: we issue BEGIN IMMEDIATE / COMMIT ourselves.
     conn = sqlite3.connect(path, isolation_level=None, timeout=5.0)
-    mode = conn.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+    mode = _enable_wal(conn)
     if mode != "wal":
         conn.close()
         raise sqlite3.OperationalError(
