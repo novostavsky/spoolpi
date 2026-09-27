@@ -21,6 +21,9 @@ _LOCAL = Path.home() / ".local" / "postgres" / "root"
 def find_postgres() -> tuple[Path, dict[str, str]] | None:
     if pg_ctl := shutil.which("pg_ctl"):
         return Path(pg_ctl).parent, dict(os.environ)
+    # Debian/Ubuntu apt packages install pg_ctl here, off PATH (e.g. on CI runners).
+    if system := sorted(glob.glob("/usr/lib/postgresql/*/bin/pg_ctl")):
+        return Path(system[-1]).parent, dict(os.environ)
     found = sorted(glob.glob(str(_LOCAL / "usr/lib/postgresql/*/bin")))
     if found:
         return Path(found[-1]), dict(

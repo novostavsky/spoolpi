@@ -14,5 +14,8 @@ htmlcov/
 bench/spike_run/
 bench/spool_spike_run/
 
+# CI venvs, builds and logs (ci/run.sh)
+.ci/
+
 # Windows NTFS Mark-of-the-Web stream, leaks in via files copied from the Windows side
 *:Zone.Identifier

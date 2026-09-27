@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Lint + the fast suite on Python 3.13 before every push (~1.5 min).
+# Run via bash so it works even if an editor dropped run.sh's executable bit.
+exec bash "$(git rev-parse --show-toplevel)/ci/run.sh" quick

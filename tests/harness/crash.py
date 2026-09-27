@@ -8,6 +8,7 @@ tests against the same mechanism.
 
 from __future__ import annotations
 
+import os
 import random
 import subprocess
 import sys
@@ -15,6 +16,13 @@ import time
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def crash_seed() -> int:
+    """Seed for a crash-test run: random, or SPOOL_CRASH_SEED to replay a failure."""
+    if fixed := os.environ.get("SPOOL_CRASH_SEED"):
+        return int(fixed)
+    return random.randrange(2**32)
 
 
 @dataclass(frozen=True, slots=True)

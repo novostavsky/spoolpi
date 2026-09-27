@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Lint before every commit (~10 s). Skip in an emergency with `git commit --no-verify`.
+# Run via bash so it works even if an editor dropped run.sh's executable bit.
+exec bash "$(git rev-parse --show-toplevel)/ci/run.sh" lint

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import random
 import sqlite3
 import sys
@@ -9,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from spool.core.buffer import INFLIGHT
-from tests.harness.crash import run_until_killed
+from tests.harness.crash import crash_seed, run_until_killed
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_ROWS = 20
@@ -103,8 +104,9 @@ def test_crash_cycles_smoke(tmp_path: Path) -> None:
 
 @pytest.mark.slow
 def test_acceptance_1000_crash_cycles(tmp_path: Path) -> None:
-    seed = random.randrange(2**32)
-    print(f"seed={seed}")  # shown by pytest if a cycle fails
-    tally = _run(tmp_path, cycles=1000, seed=seed)
+    seed = crash_seed()
+    print(f"crash-seed buffer={seed}")  # replay with SPOOL_CRASH_SEED
+    # 1,000 by default; the nightly run sets SPOOL_CRASH_CYCLES=10000.
+    tally = _run(tmp_path, cycles=int(os.environ.get("SPOOL_CRASH_CYCLES", "1000")), seed=seed)
     print(_summary(tally, seed))
     assert tally.killed_with_inflight > 0, "kills never landed mid-flight; test is too weak"

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.harness.crash import run_until_killed
+from tests.harness.crash import crash_seed, run_until_killed
 
 ROOT = Path(__file__).resolve().parent.parent
 SPAN = 1_000_000
@@ -56,8 +56,8 @@ def test_seq_crash_smoke(tmp_path: Path) -> None:
 
 @pytest.mark.slow
 def test_acceptance_100_kill_restart_cycles_never_reissue_seq(tmp_path: Path) -> None:
-    seed = random.randrange(2**32)
-    print(f"seed={seed}")
+    seed = crash_seed()
+    print(f"crash-seed seq={seed}")
     seen = _run(tmp_path, cycles=100, seed=seed)
     _check_order(seen)
     print(f"distinct seqs={len(seen)} max seq={max(seen)}")

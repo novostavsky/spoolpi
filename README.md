@@ -100,7 +100,13 @@ uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
 pytest              # fast suite
 pytest -m slow      # crash suites: 1,000 / 100 / 300 SIGKILL cycles (~7 min)
+
+git config core.hooksPath .githooks   # lint on commit, quick CI on push
+ci/run.sh           # full CI: lint, Python 3.11-3.13, package, crash suites
 ```
+
+See [`docs/ci.md`](docs/ci.md) for the CI stages, the nightly 10,000-cycle run, and the plan for
+moving to GitHub Actions.
 
 Raspberry Pi OS Bookworm and Trixie enforce PEP 668, so install into a venv rather than with a
 bare `pip install`.

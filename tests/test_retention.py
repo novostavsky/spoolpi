@@ -23,7 +23,7 @@ from spool.core.retention import (
 )
 from spool.core.shipper import Shipper
 from spool.sinks.memory import MemorySink, Raise
-from tests.harness.crash import run_until_killed
+from tests.harness.crash import crash_seed, run_until_killed
 from tests.shipping import FAST_BACKOFF, assert_invariants, drain, gap_envelopes
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -263,6 +263,6 @@ def test_retention_crash_smoke(tmp_path: Path) -> None:
 
 @pytest.mark.slow
 def test_retention_300_crash_cycles(tmp_path: Path) -> None:
-    seed = random.randrange(2**32)
-    print(f"seed={seed}")
+    seed = crash_seed()
+    print(f"crash-seed retention={seed}")
     _crash_cycles(tmp_path, cycles=300, seed=seed)
