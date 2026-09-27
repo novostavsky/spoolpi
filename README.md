@@ -14,7 +14,7 @@ carries a `(buffer_id, seq)` key, so downstream deduplication is exact.
   and the gap records ship like data.
 
 Status: pre-release (v0.1 in progress, see `spool_implementation-plan.md`). Sinks: `mqtt`
-(install `spool[mqtt]`) and `jsonl`; HTTP comes next.
+(install `spool[mqtt]`), `http` (install `spool[http]`) and `jsonl`.
 
 ## Use it
 
@@ -39,6 +39,28 @@ with Spool.from_config("spool.toml") as spool:
 See [`examples/spool.toml`](examples/spool.toml) and
 [`contrib/systemd/spool.service`](contrib/systemd/spool.service). `retention.policy` has no
 default: you decide what happens when the uplink is down long enough to fill the buffer.
+
+## Receiving data
+
+Every record carries `buffer_id` and `seq`. Delivery is at-least-once, so store records with
+`UNIQUE (buffer_id, seq)` and ignore duplicates. Records with `"type": "gap"` say how many
+readings were discarded and why (`retention:drop_oldest`, `backpressure`, `rejected:sink`).
+
+**MQTT:** one message per record on `spool/{device_id}/{type}/{sensor_id}`, QoS 1.
+
+**HTTP:** one POST per batch, with body `{"device_id": "...", "records": [...]}`
+(`Content-Encoding: gzip` if enabled). The response tells Spool what happened:
+
+| Response | Meaning |
+|---|---|
+| `2xx`, empty body or no `accepted`/`rejected` keys | every record stored |
+| `2xx` / `400` / `422` with `{"accepted": [seq...], "rejected": [seq...]}` | per record; unlisted records are retried |
+| anything else (`401`, `403`, `413`, `429`, `5xx`, a redirect, a timeout) | the whole batch is retried later |
+
+Put a record in `rejected` only if it can never succeed, for example because it fails
+validation. Spool quarantines it and reports it as a gap. Anything systemic should be a non-2xx
+error without per-record detail. Rejecting every record of a batch is treated as an outage
+anyway, not as poison.
 
 ## Development
 

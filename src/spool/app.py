@@ -69,6 +69,20 @@ def build_sink(cfg: SinkConfig, device: str) -> Sink:
             username=m.username,
             password=password,
         )
+    if cfg.type == "http" and cfg.http is not None:
+        from spool.sinks.http import HttpSink  # httpx is an optional extra
+
+        h = cfg.http
+        token = h.token_file.read_text().strip() if h.token_file is not None else None
+        return HttpSink(
+            url=h.url,
+            device_id=device,
+            timeout_s=h.timeout_s,
+            token=token,
+            ca_file=h.ca_file,
+            verify=h.verify,
+            gzip=h.gzip,
+        )
     raise ValueError(f"unsupported sink {cfg.type!r}")
 
 

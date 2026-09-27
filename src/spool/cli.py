@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from spool.app import Spool, build_sink, resolve_device_id
-from spool.config import Config, ConfigError, MqttConfig, load
+from spool.config import Config, ConfigError, HttpConfig, MqttConfig, load
 from spool.core import clock
 from spool.core.buffer import ACKED, INFLIGHT, PENDING, Buffer
 from spool.core.retention import BufferFull
@@ -207,6 +207,25 @@ def _check_mqtt(config: Config, m: MqttConfig) -> bool:
     return True
 
 
+def _check_http(h: HttpConfig) -> bool:
+    print(f"sink      http -> POST {h.url}{' (gzip)' if h.gzip else ''}")
+    ok = True
+    if importlib.util.find_spec("httpx") is None:
+        print("          PROBLEM: httpx is not installed; `uv pip install 'spool[http]'`")
+        ok = False
+    for label, path in (("ca_file", h.ca_file), ("token_file", h.token_file)):
+        if path is not None and not os.access(path, os.R_OK):
+            print(f"          PROBLEM: {label} {path} is missing or not readable")
+            ok = False
+    if h.token_file is not None and h.url.startswith("http://"):
+        print(
+            "          warning: the token is sent over plain http; use https unless this is a trusted LAN"
+        )
+    if not h.verify:
+        print("          warning: TLS certificate checks are off (verify = false)")
+    return ok
+
+
 def _cmd_check(config: Config, _args: argparse.Namespace) -> int:
     ok = True
     print(f"config    ok: {config.file}")
@@ -218,10 +237,12 @@ def _cmd_check(config: Config, _args: argparse.Namespace) -> int:
     )
     r = config.retention
     print(f"retention {r.policy}, cap {r.max_rows:,} unacked readings")
-    if config.sink.mqtt is None:
-        print(f"sink      {config.sink.type} -> {config.sink.path}")
-    else:
+    if config.sink.mqtt is not None:
         ok &= _check_mqtt(config, config.sink.mqtt)
+    elif config.sink.http is not None:
+        ok &= _check_http(config.sink.http)
+    else:
+        print(f"sink      {config.sink.type} -> {config.sink.path}")
     print(f"device    {resolve_device_id(config)}")
     print(f"source    {config.source.type}")
     synced = clock.clock_synced()

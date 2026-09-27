@@ -120,9 +120,9 @@ def test_toml_syntax_error_has_a_line(tmp_path: Path) -> None:
     assert "not valid TOML" in e.problem
 
 
-def test_planned_sink_says_it_is_not_available_yet(tmp_path: Path) -> None:
-    e = error_for(tmp_path, VALID.replace('type = "jsonl"', 'type = "http"'))
-    assert "isn't available in this version yet" in e.problem
+def test_unknown_sink_type_lists_the_available_ones(tmp_path: Path) -> None:
+    e = error_for(tmp_path, VALID.replace('type = "jsonl"', 'type = "kafka"'))
+    assert "must be one of 'jsonl', 'mqtt', 'http'" in e.problem
 
 
 def test_jsonl_sink_needs_a_path(tmp_path: Path) -> None:
@@ -186,6 +186,41 @@ def test_mqtt_timeouts_must_fit_inside_the_send_timeout(tmp_path: Path) -> None:
 def test_bool_keys_take_booleans_only(tmp_path: Path) -> None:
     text = MQTT.replace('host = "broker"', 'host = "broker"\ntls = "yes"')
     assert "must be true or false" in error_for(tmp_path, text).problem
+
+
+# --- http sink ---------------------------------------------------------------------
+
+HTTP = VALID.replace(
+    'type = "jsonl"\npath = "out/data.jsonl"\n', 'type = "http"\nurl = "https://ingest.example/x"\n'
+)
+
+
+def test_http_config_loads_with_defaults(tmp_path: Path) -> None:
+    text = HTTP.replace('/x"', '/x"\ntoken_file = "tok"\ngzip = true')
+    cfg = load(write(tmp_path, text))
+    h = cfg.sink.http
+    assert h is not None and cfg.sink.mqtt is None
+    assert (h.url, h.timeout_s, h.verify, h.gzip) == ("https://ingest.example/x", 5.0, True, True)
+    assert h.token_file == tmp_path / "tok"
+
+
+def test_http_url_is_required_and_checked(tmp_path: Path) -> None:
+    e = error_for(tmp_path, HTTP.replace('url = "https://ingest.example/x"\n', ""))
+    assert "the http sink needs sink.url" in e.problem
+    e = error_for(tmp_path, HTTP.replace("https://", "ftp://"))
+    assert "must be an http:// or https:// URL" in e.problem
+
+
+def test_http_timeout_must_fit_inside_the_send_timeout(tmp_path: Path) -> None:
+    text = HTTP.replace('/x"', '/x"\ntimeout_s = 10')
+    e = error_for(tmp_path, text)
+    assert e.line == line_of(text, "timeout_s")
+    assert "sink.timeout_s (10 s) must be less than shipper.send_timeout_s" in e.problem
+
+
+def test_mqtt_keys_are_refused_for_http(tmp_path: Path) -> None:
+    text = HTTP.replace('/x"', '/x"\nhost = "b"')
+    assert "sink.host doesn't apply to the http sink" in error_for(tmp_path, text).problem
 
 
 def test_unreadable_file(tmp_path: Path) -> None:

@@ -38,6 +38,16 @@ path = "/var/lib/spool/out.jsonl"
 # topic = "spool/{device_id}/{type}/{sensor_id}"   # fields: device_id, buffer_id, type, sensor_id
 # protocol = "5"                          # "3.1.1" works, but can't report rejected records
 
+# Or POST batches to an HTTP(S) endpoint (needs `spool[http]`). See the README for
+# the response contract, including per-record accepted/rejected lists.
+# [sink]
+# type = "http"
+# url = "https://ingest.example.org/spool"
+# token_file = "/etc/spool/http-token"   # sent as "Authorization: Bearer <token>"
+# ca_file = "/etc/spool/ca.pem"          # omit to use the system CA store
+# gzip = true                            # worth it on metered or cellular links
+# timeout_s = 5                          # must stay below [shipper] send_timeout_s
+
 # [device]
 # id = "greenhouse-1"   # default: derived from /etc/machine-id
 

@@ -18,8 +18,8 @@ from typing import Any, Final
 
 from spool.core.retention import Policy, Retention
 
-SINK_TYPES: Final = ("jsonl", "mqtt")
-PLANNED_SINKS: Final = ("http",)
+SINK_TYPES: Final = ("jsonl", "mqtt", "http")
+PLANNED_SINKS: Final[tuple[str, ...]] = ()
 SOURCE_TYPES: Final = ("stdin", "fake")
 TOPIC_FIELDS: Final = ("device_id", "buffer_id", "type", "sensor_id")
 
@@ -42,6 +42,7 @@ _SINK_KEYS: Final[dict[str, tuple[tuple[str, ...], tuple[str, ...]]]] = {
             "password_file",
         ),
     ),
+    "http": (("url",), ("timeout_s", "token_file", "ca_file", "verify", "gzip")),
 }
 
 
@@ -83,10 +84,21 @@ class MqttConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class HttpConfig:
+    url: str
+    timeout_s: float
+    token_file: Path | None
+    ca_file: Path | None
+    verify: bool
+    gzip: bool
+
+
+@dataclass(frozen=True, slots=True)
 class SinkConfig:
     type: str
     path: Path | None = None
     mqtt: MqttConfig | None = None
+    http: HttpConfig | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +148,12 @@ def _sink_type(v: Any) -> str | None:
 
 def _port(v: Any) -> str | None:
     return None if 1 <= v <= 65535 else "must be a port number between 1 and 65535"
+
+
+def _url(v: Any) -> str | None:
+    if not re.match(r"^https?://[^/\s]+", v):
+        return "must be an http:// or https:// URL"
+    return None
 
 
 def _topic(v: Any) -> str | None:
@@ -206,6 +224,11 @@ _SCHEMA: Final[dict[str, dict[str, _Key]]] = {
         "ca_file": _Key(str, None, example='ca_file = "/etc/spool/ca.pem"'),
         "username": _Key(str, None, example='username = "spool"'),
         "password_file": _Key(str, None, example='password_file = "/etc/spool/mqtt-password"'),
+        "url": _Key(str, None, _url, 'url = "https://ingest.example.org/spool"'),
+        "timeout_s": _Key(_NUMBER, 5.0, _positive, "timeout_s = 5"),
+        "token_file": _Key(str, None, example='token_file = "/etc/spool/http-token"'),
+        "verify": _Key(bool, True, example="verify = true"),
+        "gzip": _Key(bool, False, example="gzip = true"),
     },
     "device": {
         "id": _Key(str, None, example='id = "greenhouse-1"'),
@@ -353,16 +376,19 @@ def load(file: str | Path) -> Config:
             "shipper.backoff_max_s is smaller than backoff_initial_s",
             f"backoff_max_s = {shipper['backoff_initial_s']}   # or larger",
         )
-    if sink["type"] == "mqtt":
-        budget = sink["connect_timeout_s"] + sink["ack_timeout_s"]
+    # A sink's own timeouts must fit inside the shipper's, or the shipper gives up
+    # on sends the sink would still have completed.
+    budget_keys = {"mqtt": ("connect_timeout_s", "ack_timeout_s"), "http": ("timeout_s",)}
+    if keys := budget_keys.get(sink["type"]):
+        budget = sum(sink[k] for k in keys)
         if budget >= shipper["send_timeout_s"]:
-            # Otherwise the shipper gives up on sends the sink would still complete.
+            names = " + ".join(f"sink.{k}" for k in keys)
             raise loader.error(
                 "sink",
-                "ack_timeout_s",
-                f"sink.connect_timeout_s + sink.ack_timeout_s ({budget:g} s) must be less "
-                f"than shipper.send_timeout_s ({shipper['send_timeout_s']:g} s)",
-                f"raise [shipper] send_timeout_s above {budget:g}, or lower these",
+                keys[-1],
+                f"{names} ({budget:g} s) must be less than shipper.send_timeout_s "
+                f"({shipper['send_timeout_s']:g} s)",
+                f"raise [shipper] send_timeout_s above {budget:g}, or lower {names}",
             )
 
     base = path.parent
@@ -386,6 +412,16 @@ def load(file: str | Path) -> Config:
             username=sink["username"],
             password_file=rel(sink["password_file"]),
         )
+    http = None
+    if sink["type"] == "http":
+        http = HttpConfig(
+            url=sink["url"],
+            timeout_s=float(sink["timeout_s"]),
+            token_file=rel(sink["token_file"]),
+            ca_file=rel(sink["ca_file"]),
+            verify=sink["verify"],
+            gzip=sink["gzip"],
+        )
     return Config(
         file=path,
         buffer_path=base / s["buffer"]["path"],
@@ -402,7 +438,7 @@ def load(file: str | Path) -> Config:
             backoff_max_s=float(shipper["backoff_max_s"]),
             stop_timeout_s=float(shipper["stop_timeout_s"]),
         ),
-        sink=SinkConfig(sink["type"], rel(sink["path"]), mqtt),
+        sink=SinkConfig(sink["type"], rel(sink["path"]), mqtt, http),
         source=SourceConfig(
             s["source"]["type"], s["source"]["sensor_id"], float(s["source"]["rate_hz"])
         ),
