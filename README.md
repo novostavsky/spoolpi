@@ -13,8 +13,8 @@ carries a `(buffer_id, seq)` key, so downstream deduplication is exact.
 - A full buffer never fails silently. Discarded readings become gap records with exact counts,
   and the gap records ship like data.
 
-Status: pre-release (v0.1 in progress, see `spool_implementation-plan.md`). The only sink so far
-is `jsonl`; MQTT and HTTP come next.
+Status: pre-release (v0.1 in progress, see `spool_implementation-plan.md`). Sinks: `mqtt`
+(install `spool[mqtt]`) and `jsonl`; HTTP comes next.
 
 ## Use it
 

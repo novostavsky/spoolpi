@@ -23,6 +23,7 @@ from spool.config import Config, SinkConfig, load
 from spool.core import clock
 from spool.core.buffer import INFLIGHT, PENDING, BatchWriter, Buffer
 from spool.core.clock import BOOT_ID, ClockAnchor
+from spool.core.identity import device_id
 from spool.core.reading import Reading
 from spool.core.retention import BufferFull
 from spool.core.shipper import Backoff, Shipper
@@ -38,16 +39,44 @@ def _is_utf8(text: str) -> bool:
     return True
 
 
-def build_sink(cfg: SinkConfig) -> Sink:
+def resolve_device_id(config: Config) -> str:
+    return config.device_id if config.device_id is not None else device_id()
+
+
+def build_sink(cfg: SinkConfig, device: str) -> Sink:
+    """Construct the configured sink. config.load() has already validated it."""
     if cfg.type == "jsonl" and cfg.path is not None:
         return JsonlSink(cfg.path)
-    raise ValueError(f"unsupported sink {cfg.type!r}")  # config.load() already rejects these
+    if cfg.type == "mqtt" and cfg.mqtt is not None:
+        from spool.sinks.mqtt import MqttSink  # paho is an optional extra
+
+        m = cfg.mqtt
+        password = None
+        if m.password_file is not None:
+            password = m.password_file.read_text().rstrip("\r\n")
+        return MqttSink(
+            host=m.host,
+            port=m.port,
+            device_id=device,
+            topic=m.topic,
+            client_id=m.client_id,
+            protocol=m.protocol,
+            keepalive_s=m.keepalive_s,
+            connect_timeout_s=m.connect_timeout_s,
+            ack_timeout_s=m.ack_timeout_s,
+            tls=m.tls,
+            ca_file=m.ca_file,
+            username=m.username,
+            password=password,
+        )
+    raise ValueError(f"unsupported sink {cfg.type!r}")
 
 
 class Spool:
     def __init__(self, config: Config, sink: Sink | None = None) -> None:
         self.config = config
-        self._sink = sink if sink is not None else build_sink(config.sink)
+        self.device_id = resolve_device_id(config)
+        self._sink = sink if sink is not None else build_sink(config.sink, self.device_id)
         self._buffer = Buffer(
             config.buffer_path,
             retention=config.retention,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import importlib.util
 import json
 import logging
 import os
@@ -15,11 +16,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from spool.app import Spool
-from spool.config import Config, ConfigError, load
+from spool.app import Spool, build_sink, resolve_device_id
+from spool.config import Config, ConfigError, MqttConfig, load
 from spool.core import clock
 from spool.core.buffer import ACKED, INFLIGHT, PENDING, Buffer
 from spool.core.retention import BufferFull
+from spool.sinks.mqtt import MqttSink
 
 log = logging.getLogger("spool.cli")
 
@@ -184,6 +186,27 @@ def _cmd_run(config: Config, _args: argparse.Namespace) -> int:
 # --- check / status ---------------------------------------------------------------
 
 
+def _check_mqtt(config: Config, m: MqttConfig) -> bool:
+    print(f"sink      mqtt -> {m.host}:{m.port} (MQTT {m.protocol}{', TLS' if m.tls else ''})")
+    if importlib.util.find_spec("paho") is None:
+        print("          PROBLEM: paho-mqtt is not installed; `uv pip install 'spool[mqtt]'`")
+        return False
+    for label, path in (("ca_file", m.ca_file), ("password_file", m.password_file)):
+        if path is not None and not os.access(path, os.R_OK):
+            print(f"          PROBLEM: {label} {path} is missing or not readable")
+            return False
+    sink = build_sink(config.sink, resolve_device_id(config))
+    try:
+        reachable = isinstance(sink, MqttSink) and sink.is_connected(m.connect_timeout_s)
+    finally:
+        sink.close()
+    # Not a failure: Spool is meant to start offline and buffer until the broker is back.
+    print(
+        f"          broker {'reachable' if reachable else 'NOT reachable right now (Spool will buffer)'}"
+    )
+    return True
+
+
 def _cmd_check(config: Config, _args: argparse.Namespace) -> int:
     ok = True
     print(f"config    ok: {config.file}")
@@ -195,7 +218,11 @@ def _cmd_check(config: Config, _args: argparse.Namespace) -> int:
     )
     r = config.retention
     print(f"retention {r.policy}, cap {r.max_rows:,} unacked readings")
-    print(f"sink      {config.sink.type} -> {config.sink.path}")
+    if config.sink.mqtt is None:
+        print(f"sink      {config.sink.type} -> {config.sink.path}")
+    else:
+        ok &= _check_mqtt(config, config.sink.mqtt)
+    print(f"device    {resolve_device_id(config)}")
     print(f"source    {config.source.type}")
     synced = clock.clock_synced()
     print(

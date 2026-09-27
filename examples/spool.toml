@@ -24,6 +24,23 @@ stop_timeout_s = 10  # keep below systemd's TimeoutStopSec
 type = "jsonl"
 path = "/var/lib/spool/out.jsonl"
 
+# Or publish over MQTT (needs `spool[mqtt]`). One JSON message per record, QoS 1;
+# a record counts as delivered on the broker's PUBACK. Consumers deduplicate on
+# (buffer_id, seq).
+# [sink]
+# type = "mqtt"
+# host = "broker.example.org"
+# port = 8883
+# tls = true
+# ca_file = "/etc/spool/ca.pem"          # omit to use the system CA store
+# username = "spool"
+# password_file = "/etc/spool/mqtt-password"
+# topic = "spool/{device_id}/{type}/{sensor_id}"   # fields: device_id, buffer_id, type, sensor_id
+# protocol = "5"                          # "3.1.1" works, but can't report rejected records
+
+# [device]
+# id = "greenhouse-1"   # default: derived from /etc/machine-id
+
 [source]
 # "stdin": JSON lines like {"sensor_id": "t1", "value": 21.5, "unit": "C"}
 # "fake":  a counting stream, for trying Spool out

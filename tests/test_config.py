@@ -121,7 +121,7 @@ def test_toml_syntax_error_has_a_line(tmp_path: Path) -> None:
 
 
 def test_planned_sink_says_it_is_not_available_yet(tmp_path: Path) -> None:
-    e = error_for(tmp_path, VALID.replace('type = "jsonl"', 'type = "mqtt"'))
+    e = error_for(tmp_path, VALID.replace('type = "jsonl"', 'type = "http"'))
     assert "isn't available in this version yet" in e.problem
 
 
@@ -136,6 +136,56 @@ def test_backoff_bounds_must_be_ordered(tmp_path: Path) -> None:
     text = VALID + "\n[shipper]\nbackoff_initial_s = 5\nbackoff_max_s = 1\n"
     e = error_for(tmp_path, text)
     assert e.line == line_of(text, "backoff_max_s")
+
+
+# --- mqtt sink ---------------------------------------------------------------------
+
+MQTT = VALID.replace(
+    'type = "jsonl"\npath = "out/data.jsonl"\n', 'type = "mqtt"\nhost = "broker"\n'
+)
+
+
+def test_mqtt_config_loads_with_defaults(tmp_path: Path) -> None:
+    text = MQTT.replace('host = "broker"', 'host = "broker"\ntls = true\npassword_file = "pw"')
+    cfg = load(write(tmp_path, text + '\n[device]\nid = "greenhouse-1"\n'))
+    m = cfg.sink.mqtt
+    assert m is not None and cfg.sink.path is None
+    assert (m.host, m.port, m.protocol, m.tls) == ("broker", 1883, "5", True)
+    assert m.topic == "spool/{device_id}/{type}/{sensor_id}"
+    assert m.password_file == tmp_path / "pw"
+    assert cfg.device_id == "greenhouse-1"
+
+
+def test_mqtt_needs_a_host(tmp_path: Path) -> None:
+    e = error_for(tmp_path, MQTT.replace('host = "broker"\n', ""))
+    assert "the mqtt sink needs sink.host" in e.problem
+
+
+def test_keys_of_another_sink_type_are_refused(tmp_path: Path) -> None:
+    text = MQTT.replace('host = "broker"', 'host = "broker"\npath = "x.jsonl"')
+    e = error_for(tmp_path, text)
+    assert e.line == line_of(text, 'path = "x.jsonl"')
+    assert "sink.path doesn't apply to the mqtt sink" in e.problem
+
+
+def test_topic_template_is_checked(tmp_path: Path) -> None:
+    text = MQTT.replace('host = "broker"', 'host = "broker"\ntopic = "x/{sensor}"')
+    e = error_for(tmp_path, text)
+    assert "unknown field {sensor}" in e.problem
+    text = MQTT.replace('host = "broker"', 'host = "broker"\ntopic = "x/+/{sensor_id}"')
+    assert "wildcard" in error_for(tmp_path, text).problem
+
+
+def test_mqtt_timeouts_must_fit_inside_the_send_timeout(tmp_path: Path) -> None:
+    text = MQTT.replace('host = "broker"', 'host = "broker"\nack_timeout_s = 9')
+    e = error_for(tmp_path, text)
+    assert e.line == line_of(text, "ack_timeout_s")
+    assert "must be less than shipper.send_timeout_s" in e.problem
+
+
+def test_bool_keys_take_booleans_only(tmp_path: Path) -> None:
+    text = MQTT.replace('host = "broker"', 'host = "broker"\ntls = "yes"')
+    assert "must be true or false" in error_for(tmp_path, text).problem
 
 
 def test_unreadable_file(tmp_path: Path) -> None:
