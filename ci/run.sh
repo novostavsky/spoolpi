@@ -75,28 +75,31 @@ step() {
 
 # --- environments -------------------------------------------------------------------------
 
-# A venv per Python version, pinned by uv.lock (fails if pyproject.toml wasn't re-locked).
+# A venv per Python version, pinned by uv.lock. A step of its own, so a stale lockfile
+# (pyproject.toml changed without `uv lock`) is reported as that, not as a lint failure.
+sync_venv() {
+  UV_PROJECT_ENVIRONMENT="$CI/venvs/py$1" uv sync --locked --extra dev --python "$1" --quiet
+}
+
 venv_for() {
-  local py="$1" venv="$CI/venvs/py$1"
-  UV_PROJECT_ENVIRONMENT="$venv" uv sync --locked --extra dev --python "$py" --quiet
-  echo "$venv"
+  step "sync-py$1" sync_venv "$1"
+  VENV="$CI/venvs/py$1"
 }
 
 # --- stages --------------------------------------------------------------------------------
 
 do_lint() {
-  local venv
-  venv="$(venv_for "$MAIN_PY")"
-  step ruff-format "$venv/bin/ruff" format --check src tests bench
-  step ruff-check "$venv/bin/ruff" check src tests bench
-  step mypy "$venv/bin/mypy" src/spool
+  venv_for "$MAIN_PY"
+  step ruff-format "$VENV/bin/ruff" format --check src tests bench
+  step ruff-check "$VENV/bin/ruff" check src tests bench
+  step mypy "$VENV/bin/mypy" src/spool
 }
 
 do_test() {
-  local py="${1:-$MAIN_PY}" venv
-  venv="$(venv_for "$py")"
+  local py="${1:-$MAIN_PY}"
+  venv_for "$py"
   step "tests-py$py" env SPOOL_REQUIRE_INTEGRATION=1 \
-    "$venv/bin/python" -m pytest -q -p no:logging -p no:cacheprovider -rfE
+    "$VENV/bin/python" -m pytest -q -p no:logging -p no:cacheprovider -rfE
 }
 
 package_check() {
@@ -128,10 +131,9 @@ do_package() {
 }
 
 do_crash() {
-  local venv
-  venv="$(venv_for "$MAIN_PY")"
+  venv_for "$MAIN_PY"
   step crash-suites env SPOOL_REQUIRE_INTEGRATION=1 \
-    "$venv/bin/python" -m pytest -q -s -p no:logging -p no:cacheprovider -m slow -rfE
+    "$VENV/bin/python" -m pytest -q -s -p no:logging -p no:cacheprovider -m slow -rfE
 }
 
 case "$stage" in
