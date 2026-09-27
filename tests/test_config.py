@@ -132,6 +132,14 @@ def test_jsonl_sink_needs_a_path(tmp_path: Path) -> None:
     assert "path =" in e.fix
 
 
+def test_immediate_retries_default_zero_ok_negative_refused(tmp_path: Path) -> None:
+    assert load(write(tmp_path, VALID)).shipper.immediate_retries == 2
+    text = VALID + "\n[shipper]\nimmediate_retries = 0\n"
+    assert load(write(tmp_path, text)).shipper.immediate_retries == 0
+    e = error_for(tmp_path, VALID + "\n[shipper]\nimmediate_retries = -1\n")
+    assert "must not be negative" in e.problem
+
+
 def test_backoff_bounds_must_be_ordered(tmp_path: Path) -> None:
     text = VALID + "\n[shipper]\nbackoff_initial_s = 5\nbackoff_max_s = 1\n"
     e = error_for(tmp_path, text)

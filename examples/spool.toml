@@ -19,6 +19,7 @@ max_delay_s = 1.0   # ...and at most this much time's worth of readings
 batch_size = 100
 send_timeout_s = 10
 stop_timeout_s = 10  # keep below systemd's TimeoutStopSec
+immediate_retries = 2  # retry the first failures at once, then back off (0.5 s up to 60 s)
 
 [sink]
 type = "jsonl"

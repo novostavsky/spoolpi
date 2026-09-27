@@ -22,6 +22,7 @@ SINK_TYPES: Final = ("jsonl", "mqtt", "http")
 PLANNED_SINKS: Final[tuple[str, ...]] = ()
 SOURCE_TYPES: Final = ("stdin", "fake")
 TOPIC_FIELDS: Final = ("device_id", "buffer_id", "type", "sensor_id")
+IMMEDIATE_RETRIES_DEFAULT: Final = 2  # see bench/retry_policy.py for the measurement
 
 # Which [sink] keys each sink type takes; the first ones listed are required.
 _SINK_KEYS: Final[dict[str, tuple[tuple[str, ...], tuple[str, ...]]]] = {
@@ -65,6 +66,7 @@ class ShipperConfig:
     backoff_initial_s: float
     backoff_max_s: float
     stop_timeout_s: float
+    immediate_retries: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +148,10 @@ def _sink_type(v: Any) -> str | None:
     return _one_of(SINK_TYPES)(v)
 
 
+def _non_negative(v: Any) -> str | None:
+    return None if v >= 0 else "must not be negative"
+
+
 def _port(v: Any) -> str | None:
     return None if 1 <= v <= 65535 else "must be a port number between 1 and 65535"
 
@@ -202,6 +208,9 @@ _SCHEMA: Final[dict[str, dict[str, _Key]]] = {
         "purge_interval_s": _Key(_NUMBER, 60.0, _positive, "purge_interval_s = 60"),
         "backoff_initial_s": _Key(_NUMBER, 0.5, _positive, "backoff_initial_s = 0.5"),
         "backoff_max_s": _Key(_NUMBER, 60.0, _positive, "backoff_max_s = 60"),
+        "immediate_retries": _Key(
+            int, IMMEDIATE_RETRIES_DEFAULT, _non_negative, "immediate_retries = 2"
+        ),
         "stop_timeout_s": _Key(_NUMBER, 10.0, _positive, "stop_timeout_s = 10"),
     },
     "sink": {
@@ -437,6 +446,7 @@ def load(file: str | Path) -> Config:
             backoff_initial_s=float(shipper["backoff_initial_s"]),
             backoff_max_s=float(shipper["backoff_max_s"]),
             stop_timeout_s=float(shipper["stop_timeout_s"]),
+            immediate_retries=shipper["immediate_retries"],
         ),
         sink=SinkConfig(sink["type"], rel(sink["path"]), mqtt, http),
         source=SourceConfig(

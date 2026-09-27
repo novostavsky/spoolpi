@@ -38,10 +38,18 @@ class Backoff:
     initial_s: float = 0.5
     max_s: float = 60.0
     multiplier: float = 2.0
+    # The first failures of a streak are retried at once: on a flaky link most
+    # streaks are that short. Measured (bench/retry_policy.py, 50 ms uplink,
+    # 0.5-60 s backoff): at 25% send failure 0 -> 14% of full throughput, 2 -> 63%.
+    # A real outage costs this many extra attempts before the backoff takes over.
+    immediate_retries: int = 2
 
     def delay(self, failures: int, rng: random.Random) -> float:
         """Delay after ``failures`` consecutive failures (>= 1), jittered into [base/2, base]."""
-        exponent = min(failures - 1, 64)  # the cap is hit long before; avoids float overflow
+        if failures <= self.immediate_retries:
+            return 0.0
+        # The cap is hit long before 64 doublings; the min avoids float overflow.
+        exponent = min(failures - self.immediate_retries - 1, 64)
         base = min(self.max_s, self.initial_s * self.multiplier**exponent)
         return base / 2 + rng.uniform(0, base / 2)
 

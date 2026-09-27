@@ -129,17 +129,37 @@ def test_acks_for_seqs_never_sent_are_ignored(db: Path, running: list[Shipper]) 
 
 
 def test_backoff_grows_is_capped_and_jittered() -> None:
-    b = Backoff(initial_s=1, max_s=8, multiplier=2)
+    b = Backoff(initial_s=1, max_s=8, multiplier=2, immediate_retries=0)
     rng = random.Random(0)
     for failures, base in [(1, 1), (2, 2), (3, 4), (4, 8), (5, 8), (10_000, 8)]:
         for _ in range(50):
             assert base / 2 <= b.delay(failures, rng) <= base
 
 
+def test_first_failures_of_a_streak_retry_immediately() -> None:
+    b = Backoff(initial_s=1, max_s=8, multiplier=2, immediate_retries=2)
+    rng = random.Random(0)
+    assert b.delay(1, rng) == b.delay(2, rng) == 0.0
+    for failures, base in [(3, 1), (4, 2), (5, 4), (10_000, 8)]:
+        assert base / 2 <= b.delay(failures, rng) <= base
+
+
+def test_an_outage_costs_only_the_immediate_retries_before_backing_off(
+    db: Path, running: list[Shipper]
+) -> None:
+    fill(db, 10)
+    sink = MemorySink(default=Raise())
+    ship(db, sink, running, backoff=Backoff(initial_s=1.0, max_s=1.0, immediate_retries=2))
+    wait_for(lambda: sink.calls == 3)  # the first try plus two immediate retries
+    time.sleep(0.3)
+    assert sink.calls == 3  # then the backoff (at least 0.5 s) holds
+
+
 def test_failure_backoff_is_not_cut_short_by_notify(db: Path, running: list[Shipper]) -> None:
     fill(db, 10)
     sink = MemorySink([Raise()])
-    s = ship(db, sink, running, backoff=Backoff(initial_s=0.6, max_s=0.6))
+    backoff = Backoff(initial_s=0.6, max_s=0.6, immediate_retries=0)
+    s = ship(db, sink, running, backoff=backoff)
     wait_for(lambda: sink.calls == 1)
     for _ in range(10):
         s.notify()

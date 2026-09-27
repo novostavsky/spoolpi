@@ -110,7 +110,11 @@ class Spool:
             self._sink,
             batch_size=s.batch_size,
             send_timeout_s=s.send_timeout_s,
-            backoff=Backoff(initial_s=s.backoff_initial_s, max_s=s.backoff_max_s),
+            backoff=Backoff(
+                initial_s=s.backoff_initial_s,
+                max_s=s.backoff_max_s,
+                immediate_retries=s.immediate_retries,
+            ),
             poll_interval_s=s.poll_interval_s,
             purge_interval_s=s.purge_interval_s,
             anchor=self._anchor,

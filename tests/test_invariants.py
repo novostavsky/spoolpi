@@ -91,8 +91,10 @@ def test_invariants_with_poison_rows_and_a_concurrent_writer(tmp_path: Path) -> 
     assert_invariants(sink, n)
 
 
-def _drain_rate(tmp_path: Path, failure_rate: float, n: int, seed: int) -> float:
-    db = tmp_path / f"rate-{failure_rate}.db"
+def _drain_rate(
+    tmp_path: Path, failure_rate: float, n: int, seed: int, immediate_retries: int = 2
+) -> float:
+    db = tmp_path / f"rate-{failure_rate}-{immediate_retries}.db"
     fill(db, n)
     rng = random.Random(seed)
     script: list[Behavior] = [
@@ -103,7 +105,7 @@ def _drain_rate(tmp_path: Path, failure_rate: float, n: int, seed: int) -> float
         db,
         sink,
         batch_size=50,
-        backoff=Backoff(initial_s=0.005, max_s=0.1),
+        backoff=Backoff(initial_s=0.005, max_s=0.1, immediate_retries=immediate_retries),
         poll_interval_s=0.02,
         rng=rng,
     )
@@ -128,7 +130,14 @@ def test_acceptance_throughput_degrades_smoothly_with_random_failures(tmp_path: 
     assert rates[0.25] <= rates[0.0] * 1.2
     assert rates[0.5] <= rates[0.25] * 1.2
     assert rates[0.75] <= rates[0.5] * 1.2
-    # At p=0.5 each doubling level below the cap adds the same expected backoff per
-    # delivered batch (0.5**k * 2**(k-1) is constant): ~5 levels here, ~13 ms per
-    # 5 ms send, so ~20% of baseline is what the backoff model predicts.
-    assert rates[0.5] >= rates[0.0] * 0.1
+    # Without immediate retries 50% failure measured ~18% of baseline: at p=0.5 every
+    # doubling level adds the same expected delay per delivered batch. The default
+    # two immediate retries skip the short streaks, measured ~27%.
+    assert rates[0.5] >= rates[0.0] * 0.2
+
+
+def test_immediate_retries_raise_throughput_under_random_loss(tmp_path: Path) -> None:
+    without = _drain_rate(tmp_path, 0.5, 3000, seed=7, immediate_retries=0)
+    with_two = _drain_rate(tmp_path, 0.5, 3000, seed=7, immediate_retries=2)
+    print(f"fail=50%: {without:,.0f} rows/s without immediate retries, {with_two:,.0f} with two")
+    assert with_two >= without * 1.2  # measured ~1.55x
