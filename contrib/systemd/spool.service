@@ -18,8 +18,13 @@ KillSignal=SIGTERM
 TimeoutStopSec=30
 Restart=always
 RestartSec=2
-StateDirectory=spool
+# A throwaway user with a private, writable /var/lib/spool.
 DynamicUser=yes
+StateDirectory=spool
+# That user can't read root-only secrets. For an MQTT password or HTTP token,
+# let systemd hand over a private copy and point the config at it:
+#   LoadCredential=mqtt-password:/etc/spool/mqtt-password
+#   (spool.toml)  password_file = "/run/credentials/spool.service/mqtt-password"
 
 [Install]
 WantedBy=multi-user.target

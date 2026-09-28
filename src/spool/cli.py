@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from spool import __version__
 from spool.app import Spool, build_sink, resolve_device_id
 from spool.config import Config, ConfigError, HttpConfig, MqttConfig, load
 from spool.core import clock
@@ -295,6 +296,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="spool", description="Crash-safe store-and-forward buffer"
     )
+    parser.add_argument("--version", action="version", version=f"spool {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("run", help="buffer readings from the configured source and ship them")
     sub.add_parser("check", help="validate the config and the environment")

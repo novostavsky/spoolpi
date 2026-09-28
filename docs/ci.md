@@ -11,7 +11,7 @@ ci/run.sh              # = all: lint, tests on 3.11/3.12/3.13, package, crash su
 ci/run.sh quick        # lint + tests on 3.13 (~1.5 min)
 ci/run.sh lint         # ruff format --check, ruff check, mypy --strict on src/spool
 ci/run.sh test 3.11    # the fast suite on one Python version
-ci/run.sh package      # wheel -> clean venv -> "only spool installed" -> spool check / run
+ci/run.sh package      # build; twine check --strict; wheel contents; clean venv -> "only spool installed" -> spool check / run
 ci/run.sh crash        # SIGKILL suites: 1,000 (buffer) / 100 (seq) / 300 (retention) cycles
 ci/run.sh nightly      # crash suites at 10,000 cycles (~60 min)
 ci/run.sh last         # summary of the most recent run

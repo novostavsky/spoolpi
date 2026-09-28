@@ -3,13 +3,32 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
+# "spool" is already taken on PyPI: pick the published name before any upload
+# (open question in spool_implementation-plan.md). The import name stays `spool`.
 name = "spool"
-version = "0.1.0.dev0"
+dynamic = ["version"]
 description = "Crash-safe store-and-forward buffering for edge sensor data"
 readme = "README.md"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "novostavsky", email = "novostavsky@gmail.com" }]
 requires-python = ">=3.11"
-dependencies = []
+dependencies = []  # the core is stdlib-only, and this stays empty
+keywords = ["iot", "edge", "sensor", "store-and-forward", "buffer", "sqlite", "mqtt", "raspberry-pi"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: System :: Hardware",
+    "Topic :: System :: Networking",
+    "Typing :: Typed",
+]
 
 [project.optional-dependencies]
 mqtt = ["paho-mqtt>=2.0"]
@@ -24,13 +43,29 @@ dev = [
     "paho-mqtt>=2.0",
     "httpx>=0.27",
     "psycopg[binary]>=3.1",
+    "twine",
 ]
 
 [project.scripts]
 spool = "spool.cli:main"
 
+[tool.hatch.version]
+path = "src/spool/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/spool"]
+exclude = ["**/.gitkeep"]
+
+[tool.hatch.build.targets.sdist]
+# The planning doc is internal (local paths, notes); caches and CI state aren't source.
+exclude = [
+    "/.ci",
+    "/.githooks",
+    "/.hypothesis",
+    "/bench/*_run",
+    "/uv.lock",
+    "/spool_implementation-plan.md",
+]
 
 [tool.ruff]
 line-length = 100

@@ -70,7 +70,9 @@ step() {
   fi
   # Crash suites print their seeds; keep them in the summary so failures can be replayed
   # (SPOOL_CRASH_SEED=<seed> ci/run.sh crash).
-  grep -hE '^crash-seed |^seed=[0-9]+ cycles=|^distinct seqs=' "$log" 2>/dev/null | sed 's/^/      /' | tee -a "$SUMMARY" || true
+  # pytest's progress dots can share the line, so match anywhere and strip them.
+  grep -hoE 'crash-seed [a-z]+=[0-9]+|seed=[0-9]+ cycles=.*|distinct seqs=.*' "$log" 2>/dev/null \
+    | sed 's/^/      /' | tee -a "$SUMMARY" || true
 }
 
 # --- environments -------------------------------------------------------------------------
@@ -108,6 +110,19 @@ package_check() {
   local dist="$CI/dist" clean="$CI/venvs/clean" tmp installed
   rm -rf "$dist" "$clean"
   uv build --quiet --out-dir "$dist" || return 1
+  # Metadata and README render the way PyPI will need them (no upload happens here).
+  "$VENV/bin/twine" check --strict "$dist"/* || return 1
+  # The wheel holds the package, its type marker and data files, and nothing else.
+  local files
+  files="$("$VENV/bin/python" -m zipfile -l "$dist"/*.whl)" || return 1
+  for needed in spool/py.typed spool/consumer/schema.sql spool/cli.py; do
+    grep -q "$needed" <<<"$files" || { echo "wheel is missing $needed"; return 1; }
+  done
+  if grep -qE '\.gitkeep|/tests?/|\.pyc|__pycache__' <<<"$files"; then
+    echo "wheel contains files that don't belong in it:"
+    grep -E '\.gitkeep|/tests?/|\.pyc|__pycache__' <<<"$files"
+    return 1
+  fi
   uv venv --quiet --python "$MAIN_PY" "$clean" || return 1
   uv pip install --quiet --python "$clean/bin/python" "$dist"/*.whl || return 1
   # Zero runtime dependencies: the clean venv must hold spool and nothing else.
@@ -127,6 +142,7 @@ package_check() {
 }
 
 do_package() {
+  venv_for "$MAIN_PY"
   step package package_check
 }
 
