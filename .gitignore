@@ -20,3 +20,4 @@ bench/spoolpi_spike_run/
 
 # Windows NTFS Mark-of-the-Web stream, leaks in via files copied from the Windows side
 *:Zone.Identifier
+.git-commit-msg.txt
