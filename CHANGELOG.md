@@ -44,7 +44,9 @@ See `docs/hardware.md`.
   keeps the device's original timestamp.
 
 ### Known limitations
-- Power cuts are measured with simulated cuts (sysrq resets); real plug pulls are still to do.
+- Power-cut safety is measured on one Pi and one SD card: 25 simulated cuts and 5 real plug
+  pulls, 0 committed readings lost. Cards that acknowledge writes early may do worse; check
+  yours with `bench/pi/powercut.py --manual`.
 - No schema migrations: an upgrade that changes the buffer schema needs an empty buffer.
 - Quarantined records can't be re-sent.
 - One writer process per buffer.

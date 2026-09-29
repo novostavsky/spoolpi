@@ -203,6 +203,36 @@ The earlier runs set `synchronous=FULL` directly. This one went through the new
 `[buffer] durability = "power"` path. Cuts at 24, 84, 78, 60 and 30 s kept all 243, 848, 782,
 606 and 298 committed readings. Integrity ok 5/5.
 
+### Real plug pulls, `durability = "power"` (5 pulls, 2026-09-29)
+
+A sysrq reset keeps the SD card powered, so writes still in the card's own cache survive it. A
+real power loss doesn't allow that. So the last check pulled the Pi's power plug by hand, with
+`bench/pi/powercut.py 5 power spoolpi-zero 41 --manual`. The script:
+- waits for the boot to finish and syncs;
+- tells the operator when to pull;
+- notices the Pi go dark (SSH keepalive, ~3 s), asks for the plug back, then inspects the buffer.
+
+| Pull | Readings stored after the pull | Contiguous from the first step | Committed readings lost |
+|---|---|---|---|
+| 1 | 56 | yes | 0 |
+| 2 | 56 | yes | 0 |
+| 3 | 309 | yes | 0 |
+| 4 | 221 | yes | 0 |
+| 5 | 507 | yes | 0 |
+
+- **The buffer:** `PRAGMA integrity_check` passed after all five pulls, and each pull's readings
+  are a gap-free run from the first step.
+- **The Pi:** it came back with its network every time.
+- **Where the numbers come from:**
+  - "Committed readings lost" is as the operator read it from the script's output (0 for every
+    pull). That output wasn't saved, so the script now also writes its results to
+    `.bench-results/`.
+  - The stored counts, contiguity and integrity were checked afterwards, directly on the Pi.
+
+So with this card, a real power loss behaved like the simulated ones: nothing the buffer called
+committed was lost. Other cards may behave differently. A card that acknowledges writes before
+they're durable would lose recent commits even under `FULL`. This test is how to find out.
+
 **`NORMAL` vs `FULL`, summed up:**
 
 | | `"process"` = `NORMAL` (10 cuts) | `"power"` = `FULL` (25 cuts) |
@@ -295,5 +325,5 @@ power-on, in which a power cut can erase the network configuration.**
   SpoolPi's writes, not the OS's boot-time writes. It also stops when the Pi doesn't return within
   5 minutes, keeping the cuts completed so far.
 
-Still to do: real plug pulls. A sysrq reset keeps the SD card powered, so the card's own write
-cache survives; a plug pull doesn't.
+Real plug pulls are covered in [their own section](#real-plug-pulls-durability--power-5-pulls-2026-09-29)
+above.

@@ -20,7 +20,7 @@ What SpoolPi promises about each reading, what can go wrong, and how each claim 
 |---|---|---|
 | Process crash (SIGKILL, OOM kill, Python crash) | Readings in the uncommitted batch: at most `batch.max_rows`, or `batch.max_delay_s` worth | 1,000-cycle SIGKILL test (`tests/test_buffer_crash.py`), on every CI run and at 10,000 cycles nightly |
 | `systemctl stop` / SIGTERM | Nothing. Pending readings are committed and the batch in flight is finished (within `shipper.stop_timeout_s`) | `tests/test_cli.py`, `bench/systemd_restart_check.py` |
-| Power cut, kernel panic | With `durability = "power"` (the default): the uncommitted batch, as for a crash. With `"process"`: also the commits of roughly the last 30 s. See the next section | 25 simulated power cuts on a Pi Zero 2 W with `"power"`, 10 with `"process"` (`bench/pi/powercut.py`); real plug pulls still to do |
+| Power cut, kernel panic | With `durability = "power"` (the default): the uncommitted batch, as for a crash. With `"process"`: also the commits of roughly the last 30 s. See the next section | 25 simulated power cuts and 5 real plug pulls on a Pi Zero 2 W with `"power"`, and 10 simulated cuts with `"process"` (`bench/pi/powercut.py`) |
 | Buffer full | Nothing silently. The retention policy discards readings and records each discard in a gap record | Hypothesis state machine + 300-cycle SIGKILL test (`tests/test_retention.py`) |
 | Sink permanently rejects a record | The record is quarantined in the buffer, not shipped, and reported as a `rejected:sink` gap | `tests/test_poison.py` |
 
@@ -67,8 +67,15 @@ Under `"process"`, what survived was what the kernel had written back on its 30 
 everything up to the last seq reservation, whichever was later. No cut came near the
 ~1,000-record bound.
 
-One limit on these results: the simulated cut doesn't drop the SD card's own write cache, as a
-real plug pull can.
+**Real plug pulls:** a simulated cut keeps the SD card powered. So the last check was 5 real
+plug pulls under `"power"`:
+- 0 committed readings lost;
+- integrity ok every time;
+- every pull's readings stored gap-free.
+
+One limit remains: that's one card. A card that acknowledges writes before they're durable
+would lose recent commits even under `"power"`. Run `bench/pi/powercut.py --manual` on your own
+hardware to check.
 
 ## What can be duplicated
 

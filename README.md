@@ -28,8 +28,8 @@ so a receiver removes them mechanically. Method and caveats:
 - **Full buffer:** never silent. Discarded readings become gap records with exact counts, and
   the gap records ship like data.
 - **Power cut:** the same as a crash, by default: at most the uncommitted batch. On a Pi Zero 2 W,
-  25 simulated power cuts lost no committed readings and never corrupted the buffer. The cheaper
-  `durability = "process"` loses about the last 30 s instead.
+  25 simulated power cuts and 5 real plug pulls lost no committed readings and never corrupted
+  the buffer. The cheaper `durability = "process"` loses about the last 30 s instead.
 - **Clock:** readings taken before NTP sync are marked as such. After a cold boot, SpoolPi holds
   them (up to 120 s by default) until the clock syncs, then ships them re-timestamped. The
   reference consumer corrects any that shipped unsynced once their boot's clock is known.

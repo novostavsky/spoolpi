@@ -27,11 +27,13 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 HOST = "spoolpi-zero"
 DB = "spoolpi-powercut/buffer.db"
 SPAN = 1_000_000
 PY = "cd ~/spoolpi && PATH=$HOME/spoolpi/.venv/bin:$PATH"
+RESULTS = Path(__file__).resolve().parents[2] / ".bench-results"  # gitignored
 
 
 def ssh(host: str, command: str, timeout: float = 60) -> subprocess.CompletedProcess[str]:
@@ -180,10 +182,18 @@ def main() -> None:
     seed = int(args[3]) if len(args) > 3 else random.randrange(2**32)
     rng = random.Random(seed)
     how = "manual plug pulls" if manual else "sysrq resets"
-    print(
-        f"power-cut test: {cycles} cycles ({how}), synchronous={synchronous}, seed={seed}",
-        flush=True,
-    )
+    # Results also go to a file, so they outlive the terminal window.
+    RESULTS.mkdir(exist_ok=True)
+    log_path = RESULTS / time.strftime(f"powercut-%Y%m%d-%H%M%S-{synchronous.lower()}.log")
+    log = log_path.open("a")
+
+    def emit(line: str) -> None:
+        print(line, flush=True)
+        log.write(line + "\n")
+        log.flush()
+
+    emit(f"power-cut test: {cycles} cycles ({how}), synchronous={synchronous}, seed={seed}")
+    print(f"(results are also saved to {log_path})", flush=True)
     ssh(host, "rm -rf ~/spoolpi-powercut && sync")
     results = []
     stopped = ""
@@ -195,17 +205,16 @@ def main() -> None:
             stopped = f"; STOPPED at cut {i}: {e}"
             break
         results.append(r)
-        print(json.dumps(r), flush=True)
+        emit(json.dumps(r))
     if not results:
-        print(f"SUMMARY synchronous={synchronous}: no completed cuts{stopped}", flush=True)
+        emit(f"SUMMARY synchronous={synchronous}: no completed cuts{stopped}")
         sys.exit(1)
     lost = [int(r["lost"]) for r in results]  # type: ignore[call-overload]
     bad = [r for r in results if r["integrity"] != "ok"]
-    print(
+    emit(
         f"SUMMARY synchronous={synchronous}: {len(results)} cuts, lost committed readings "
         f"max {max(lost)}, mean {sum(lost) / len(lost):.1f}, cuts with any loss "
-        f"{sum(1 for x in lost if x)}; integrity failures {len(bad)}{stopped}",
-        flush=True,
+        f"{sum(1 for x in lost if x)}; integrity failures {len(bad)}{stopped}"
     )
     sys.exit(1 if stopped else 0)
 
