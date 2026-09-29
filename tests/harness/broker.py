@@ -22,9 +22,10 @@ def find_mosquitto() -> tuple[str, dict[str, str]] | None:
         return path, dict(os.environ)
     local = _LOCAL / "usr" / "sbin" / "mosquitto"
     if local.exists():
-        # Multiarch dirs: x86_64-linux-gnu here, aarch64-linux-gnu on a Pi.
+        # Multiarch dirs: x86_64-linux-gnu here, aarch64-linux-gnu on a 64-bit Pi,
+        # arm-linux-gnueabihf on a 32-bit one.
         libs = ":".join(
-            str(d) for sub in ("usr/lib", "lib") for d in sorted(_LOCAL.glob(f"{sub}/*-linux-gnu"))
+            str(d) for sub in ("usr/lib", "lib") for d in sorted(_LOCAL.glob(f"{sub}/*-linux-gnu*"))
         )
         return str(local), dict(os.environ, LD_LIBRARY_PATH=libs)
     return None

@@ -2,6 +2,8 @@
 
 Measured on a **Raspberry Pi Zero 2 W** (Rev 1.0, 4 × Cortex-A53, 415 MB RAM usable) running
 Raspberry Pi OS on Debian 13 (trixie), 64-bit kernel, Python 3.13.5, with a 256 GB microSD card.
+The same Pi was then reflashed with **32-bit** Raspberry Pi OS; see
+[32-bit Raspberry Pi OS](#32-bit-raspberry-pi-os-2026-09-29).
 The scripts are in `bench/pi/`. `bash bench/pi/deploy.sh` pushes the working tree to the Pi,
 and `bash bench/pi/run.sh <command>` runs a command there.
 
@@ -143,7 +145,7 @@ It needs this sudo rule on the Pi, narrow on purpose:
 pi ALL=(root) NOPASSWD: /usr/bin/tee /proc/sysrq-trigger, /usr/bin/systemctl * systemd-timesyncd, /usr/bin/timedatectl set-ntp *, /usr/bin/date -s *, /usr/sbin/reboot
 ```
 
-### `synchronous=NORMAL` (the current default), seed 11
+### `synchronous=NORMAL` (the default until 09-29, now `durability = "process"`), seed 11
 
 | Cut | Ran | Committed (reported) | Survived | Lost | Integrity |
 |---|---|---|---|---|---|
@@ -327,3 +329,71 @@ power-on, in which a power cut can erase the network configuration.**
 
 Real plug pulls are covered in [their own section](#real-plug-pulls-durability--power-5-pulls-2026-09-29)
 above.
+
+## 32-bit Raspberry Pi OS (2026-09-29)
+
+The same Zero 2 W and card, reflashed with Raspberry Pi OS Lite **32-bit**, i.e. trixie:
+- `armv7l`, kernel `6.18.50+rpt-rpi-v7`;
+- `armhf` userland, 32-bit `long`;
+- Python 3.13.5.
+
+32-bit installs are still common in the field (plan pitfall 2), and one piece of SpoolPi depends
+on the word size: the `adjtimex` struct layout.
+
+| Check | Result |
+|---|---|
+| Clock backend | **`adjtimex`**: the struct canaries passed on import with the 32-bit layout (`long` = 4 bytes, `struct timex` = 128 bytes), and it read the correct time and sync state |
+| Fast test suite | **234 passed**, 1 skipped (the Postgres consumer: no libpq / PostgreSQL on the Pi). That includes the MQTT integration tests against a local mosquitto, and the crash smoke tests |
+| Memory, jsonl sink | **19.4 MB** peak (64-bit: 24.0 MB), +0.14 MB after warm-up, 3 threads |
+| Memory, MQTT sink | **22.2 MB** peak (64-bit: 28.2 MB), +0.15 MB after warm-up, 4 threads |
+| Clock, uplink up before sync, with the hold | 0 of 650 pre-sync readings uncorrected; corrected to 3 µs |
+| Clock, uplink only after sync | 0 of 650 uncorrected; corrected to ≤ 4 µs |
+
+### Found on 32-bit: failed sends leaked their thread stacks
+
+The first 32-bit suite run had **10 failures**, all `RuntimeError: can't start new thread`.
+Tracking the process's address space test by test showed it growing by hundreds of MB while
+only one thread was alive. After the throughput tests, 159 leftover **8 MB anonymous mappings**
+were still there: the stacks of send threads that had already finished.
+
+**Cause:**
+- The shipper runs each send on a short-lived thread and never joined it.
+- Since Python 3.13, threads are "joinable": a thread's stack is released only when it's
+  joined, or when its `Thread` object is freed.
+- A failed send's exception holds the send's frames in a reference cycle. The frames reach the
+  thread's bootstrap frame, and through it the `Thread` object, so that object lived on until
+  the cyclic garbage collector ran.
+- On a 32-bit process, with ~3 GB of address space and 8 MB per stack, about 350 failed sends
+  were enough to make every further send impossible. That is exactly what an uplink outage
+  produces.
+- Python 3.11/3.12 detached threads at start, so they're unaffected. On x86-64 the same run
+  showed no leftover stacks at all, which is why no x86 run ever caught it.
+
+**Reproduced with the real shipper,** outside pytest, on the 32-bit Pi, with half the sends
+failing:
+
+| | 8 MB stacks left mapped | Virtual size |
+|---|---|---|
+| before the fix | 76 after 137 sends | 45 → 663 MB |
+| **after the fix** | **0** | 45 → 46 MB |
+
+**The fix:**
+- The shipper joins each send thread once its send has finished. The thread has already set its
+  "done" flag, so the join returns at once.
+- Abandoned (hung) sends are joined when they eventually finish.
+- `tests/test_shipper.py::test_failed_sends_do_not_keep_thread_stacks` runs 40 failing sends with
+  the cyclic GC off, and checks that no thread stacks are left mapped. It failed on the Pi
+  before the fix and passes after it.
+
+**Why the memory test didn't catch it:** RSS stays flat, because a reserved stack costs address
+space, not memory. And the 5-minute run made only ~300 sends, all of them successful.
+
+### Packaging found on 32-bit
+- **`psycopg-binary`** (the `consumer` extra) has no 32-bit ARM wheels. On machines without a
+  wheel, the extra now uses plain `psycopg`, which needs the system's `libpq5`
+  (`sudo apt install libpq5`).
+- **The development tools don't build there:** mypy's compiled helper has no `armv7l` wheel.
+  The new `test` extra holds only what the test suite needs (`dev` = `test` + lint and
+  packaging tools), and `bench/pi/deploy.sh` installs `test`.
+- **The test harness's no-root mosquitto/Postgres finders** looked for `*-linux-gnu` library
+  directories and missed `arm-linux-gnueabihf`. They now match both.

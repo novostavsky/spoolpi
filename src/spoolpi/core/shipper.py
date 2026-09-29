@@ -292,6 +292,9 @@ class Shipper:
 
     def _send(self, batch: list[Envelope]) -> AckSet | None:
         """The sink's AckSet, or None if the send raised, timed out, or wasn't attempted."""
+        for t in self._abandoned:
+            if not t.is_alive():
+                t.join()  # a hung send that finished late: free its stack (see below)
         self._abandoned = [t for t in self._abandoned if t.is_alive()]
         if len(self._abandoned) >= self._max_abandoned:
             log.warning("%d hung sends still running; not sending more", len(self._abandoned))
@@ -323,6 +326,12 @@ class Shipper:
                 self.stats.failed_sends += 1
                 log.warning("send timed out; releasing batch of %d", len(batch))
                 return None
+        # Join, don't just drop it: on Python 3.13 an unjoined thread's stack (8 MB) stays
+        # mapped for as long as its Thread object lives, and a failed send's exception can
+        # keep that object alive in a reference cycle. On a 32-bit Pi that ran the process
+        # out of address space after ~350 failed sends, i.e. during an uplink outage.
+        # done is set in the thread's last statement, so this returns at once.
+        sender.join()
         if not result:
             self.stats.failed_sends += 1
             return None

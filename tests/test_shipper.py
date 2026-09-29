@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import gc
 import random
+import resource
 import sqlite3
 import time
 from collections.abc import Iterator, Sequence
@@ -287,6 +289,44 @@ def test_unsynced_readings_are_corrected_at_ship_time(db: Path, running: list[Sh
         assert isinstance(e.payload, Reading)
         assert e.payload.ts_quality == TS_CORRECTED
         assert e.payload.wall_ns == e.payload.mono_ns + offset
+
+
+# --- thread stacks ---------------------------------------------------------------
+
+
+def _thread_stack_mappings() -> int:
+    """Anonymous rw mappings the size of a default thread stack (RLIMIT_STACK)."""
+    soft, _ = resource.getrlimit(resource.RLIMIT_STACK)
+    if soft == resource.RLIM_INFINITY:
+        pytest.skip("unlimited stack size: thread stacks don't have a recognisable size")
+    n = 0
+    with open("/proc/self/maps") as f:
+        for line in f:
+            fields = line.split()
+            lo, hi = (int(x, 16) for x in fields[0].split("-"))
+            if fields[1] == "rw-p" and len(fields) == 5 and hi - lo == soft:
+                n += 1
+    return n
+
+
+@pytest.mark.skipif(not Path("/proc/self/maps").exists(), reason="needs Linux /proc")
+def test_failed_sends_do_not_keep_thread_stacks(db: Path, running: list[Shipper]) -> None:
+    # Regression, found on a 32-bit Pi. A failed send's exception holds its frames in a
+    # reference cycle, and that keeps the finished send thread's Thread object alive. Under
+    # Python 3.13, an unjoined thread keeps its stack mapped (8 MB) until that object is
+    # freed. A 32-bit process ran out of address space after ~350 failed sends and could
+    # no longer start send threads at all. The fix joins each finished send.
+    gc.disable()  # the leak waited on the cyclic GC; don't let it hide the bug
+    try:
+        fill(db, 10)
+        before = _thread_stack_mappings()
+        sink = MemorySink([Raise() for _ in range(40)])
+        s = ship(db, sink, running, backoff=Backoff(initial_s=0.001, max_s=0.002))
+        drain(db)
+        assert s.stats.failed_sends >= 40
+        assert _thread_stack_mappings() - before <= 3
+    finally:
+        gc.enable()
 
 
 # --- holding unsynced readings -------------------------------------------------

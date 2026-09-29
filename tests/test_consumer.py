@@ -10,7 +10,8 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("psycopg")
+# ImportError too: plain psycopg (32-bit ARM) installs fine but fails to import without libpq.
+pytest.importorskip("psycopg", exc_type=ImportError)
 pytest.importorskip("paho.mqtt")
 
 import psycopg

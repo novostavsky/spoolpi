@@ -135,6 +135,9 @@ export SPOOLPI_CONSUMER_DSN=postgresql://spoolpi@db/telemetry
 python -m spoolpi.consumer --broker broker.example.org:1883 --init-schema
 ```
 
+On machines without a prebuilt `psycopg-binary` wheel (32-bit ARM, for example), the extra
+installs plain `psycopg`, which needs the system's libpq: `sudo apt install libpq5`.
+
 It creates the tables in
 [`src/spoolpi/consumer/schema.sql`](src/spoolpi/consumer/schema.sql): `spoolpi_readings`, `spoolpi_gaps`
 and `spoolpi_dead_letters`, each keyed by `(buffer_id, seq)`, plus `spoolpi_boot_clocks`, with

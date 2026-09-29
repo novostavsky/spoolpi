@@ -19,8 +19,9 @@ if ! command -v uv >/dev/null; then
 fi
 echo "== $(uv --version)"
 cd ~/spoolpi
-echo "== syncing the locked environment (first run downloads wheels for aarch64)"
-uv sync --locked --extra dev --quiet
+echo "== syncing the locked environment (the first run downloads wheels for this platform)"
+# The test extra only: lint tools like mypy have no 32-bit ARM wheels, and the Pi doesn't lint.
+uv sync --locked --extra test --quiet
 .venv/bin/spoolpi --version
 # The power-cut test resets the Pi without syncing; make sure the deploy itself is on disk.
 sync

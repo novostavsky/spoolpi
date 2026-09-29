@@ -26,7 +26,7 @@ def find_postgres() -> tuple[Path, dict[str, str]] | None:
         return Path(system[-1]).parent, dict(os.environ)
     found = sorted(glob.glob(str(_LOCAL / "usr/lib/postgresql/*/bin")))
     if found:
-        libs = ":".join(sorted(glob.glob(str(_LOCAL / "usr/lib/*-linux-gnu"))))
+        libs = ":".join(sorted(glob.glob(str(_LOCAL / "usr/lib/*-linux-gnu*"))))  # incl. gnueabihf
         return Path(found[-1]), dict(os.environ, LD_LIBRARY_PATH=libs)
     return None
 

@@ -4,8 +4,8 @@
 
 First release. It works end to end on a device, from the sensor to Postgres, and is tested
 against real SIGKILLs, a real MQTT broker and a real database. It's measured on a Raspberry Pi
-Zero 2 W: SD-card commit latency, simulated power cuts, memory (< 30 MB), and a real NTP step.
-See `docs/hardware.md`.
+Zero 2 W, on 64-bit and on 32-bit Raspberry Pi OS: SD-card commit latency, simulated power cuts
+and real plug pulls, memory (< 30 MB), and a real NTP step. See `docs/hardware.md`.
 
 ### Buffer and delivery
 - SQLite WAL buffer. A SIGKILL loses at most the uncommitted batch (default 50 readings or 1 s),
@@ -42,6 +42,13 @@ See `docs/hardware.md`.
   once via `UNIQUE (buffer_id, seq)`, with a dead-letter table. It corrects readings that shipped
   before the device's clock synced, using each boot's clock offset (`spoolpi_boot_clocks`), and
   keeps the device's original timestamp.
+
+### Fixed before release
+- The shipper leaked the 8 MB stack of every failed send's thread on Python 3.13 until the cyclic
+  GC ran. On a 32-bit Pi, about 350 failed sends (an uplink outage) exhausted the address space
+  and stopped delivery. Send threads are now joined. Found by testing on 32-bit Raspberry Pi OS.
+- `spoolpi[consumer]` couldn't install on 32-bit ARM (no `psycopg-binary` wheels). It now falls
+  back to plain `psycopg` there, which needs the system's `libpq5`.
 
 ### Known limitations
 - Power-cut safety is measured on one Pi and one SD card: 25 simulated cuts and 5 real plug

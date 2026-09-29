@@ -31,18 +31,25 @@ classifiers = [
 [project.optional-dependencies]
 mqtt = ["paho-mqtt>=2.0"]
 http = ["httpx>=0.27"]
-consumer = ["paho-mqtt>=2.0", "psycopg[binary]>=3.1"]
-dev = [
+# psycopg-binary only has wheels for these machines; elsewhere (32-bit ARM, i.e. armv7l on
+# 32-bit Raspberry Pi OS) plain psycopg is used, which needs the system libpq (libpq5).
+consumer = [
+    "paho-mqtt>=2.0",
+    "psycopg[binary]>=3.1; platform_machine == 'x86_64' or platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'ppc64le' or platform_machine == 'riscv64'",
+    "psycopg>=3.1; platform_machine != 'x86_64' and platform_machine != 'AMD64' and platform_machine != 'aarch64' and platform_machine != 'arm64' and platform_machine != 'ppc64le' and platform_machine != 'riscv64'",
+]
+# What running the test suite needs; pure Python or widely built, so it installs on a
+# 32-bit Pi too (bench/pi/deploy.sh uses it).
+test = [
     "pytest",
     "hypothesis",
-    "ruff",
-    "mypy",
-    "pytest-cov",
     "paho-mqtt>=2.0",
     "httpx>=0.27",
-    "psycopg[binary]>=3.1",
-    "twine",
+    "psycopg[binary]>=3.1; platform_machine == 'x86_64' or platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'ppc64le' or platform_machine == 'riscv64'",
+    "psycopg>=3.1; platform_machine != 'x86_64' and platform_machine != 'AMD64' and platform_machine != 'aarch64' and platform_machine != 'arm64' and platform_machine != 'ppc64le' and platform_machine != 'riscv64'",
 ]
+# The test suite plus lint, type-check and packaging tools (CI and development machines).
+dev = ["spoolpi[test]", "ruff", "mypy", "pytest-cov", "twine"]
 
 [project.scripts]
 spoolpi = "spoolpi.cli:main"

@@ -2,8 +2,10 @@ version = 1
 revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
-    "python_full_version >= '3.15'",
-    "python_full_version < '3.15'",
+    "python_full_version >= '3.15' and platform_machine != 'AMD64' and platform_machine != 'aarch64' and platform_machine != 'arm64' and platform_machine != 'ppc64le' and platform_machine != 'riscv64' and platform_machine != 'x86_64'",
+    "(python_full_version >= '3.15' and platform_machine == 'AMD64') or (python_full_version >= '3.15' and platform_machine == 'aarch64') or (python_full_version >= '3.15' and platform_machine == 'arm64') or (python_full_version >= '3.15' and platform_machine == 'ppc64le') or (python_full_version >= '3.15' and platform_machine == 'riscv64') or (python_full_version >= '3.15' and platform_machine == 'x86_64')",
+    "python_full_version < '3.15' and platform_machine != 'AMD64' and platform_machine != 'aarch64' and platform_machine != 'arm64' and platform_machine != 'ppc64le' and platform_machine != 'riscv64' and platform_machine != 'x86_64'",
+    "(python_full_version < '3.15' and platform_machine == 'AMD64') or (python_full_version < '3.15' and platform_machine == 'aarch64') or (python_full_version < '3.15' and platform_machine == 'arm64') or (python_full_version < '3.15' and platform_machine == 'ppc64le') or (python_full_version < '3.15' and platform_machine == 'riscv64') or (python_full_version < '3.15' and platform_machine == 'x86_64')",
 ]
 
 [[package]]
@@ -1245,14 +1247,16 @@ source = { editable = "." }
 [package.optional-dependencies]
 consumer = [
     { name = "paho-mqtt" },
-    { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg" },
+    { name = "psycopg", extra = ["binary"], marker = "platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'ppc64le' or platform_machine == 'riscv64' or platform_machine == 'x86_64'" },
 ]
 dev = [
     { name = "httpx" },
     { name = "hypothesis" },
     { name = "mypy" },
     { name = "paho-mqtt" },
-    { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg" },
+    { name = "psycopg", extra = ["binary"], marker = "platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'ppc64le' or platform_machine == 'riscv64' or platform_machine == 'x86_64'" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
@@ -1264,24 +1268,40 @@ http = [
 mqtt = [
     { name = "paho-mqtt" },
 ]
+test = [
+    { name = "httpx" },
+    { name = "hypothesis" },
+    { name = "paho-mqtt" },
+    { name = "psycopg" },
+    { name = "psycopg", extra = ["binary"], marker = "platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'ppc64le' or platform_machine == 'riscv64' or platform_machine == 'x86_64'" },
+    { name = "pytest" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'http'", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27" },
     { name = "hypothesis", marker = "extra == 'dev'" },
+    { name = "hypothesis", marker = "extra == 'test'" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "paho-mqtt", marker = "extra == 'consumer'", specifier = ">=2.0" },
     { name = "paho-mqtt", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "paho-mqtt", marker = "extra == 'mqtt'", specifier = ">=2.0" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'consumer'", specifier = ">=3.1" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'dev'", specifier = ">=3.1" },
+    { name = "paho-mqtt", marker = "extra == 'test'", specifier = ">=2.0" },
+    { name = "psycopg", marker = "platform_machine != 'AMD64' and platform_machine != 'aarch64' and platform_machine != 'arm64' and platform_machine != 'ppc64le' and platform_machine != 'riscv64' and platform_machine != 'x86_64' and extra == 'consumer'", specifier = ">=3.1" },
+    { name = "psycopg", marker = "platform_machine != 'AMD64' and platform_machine != 'aarch64' and platform_machine != 'arm64' and platform_machine != 'ppc64le' and platform_machine != 'riscv64' and platform_machine != 'x86_64' and extra == 'dev'", specifier = ">=3.1" },
+    { name = "psycopg", marker = "platform_machine != 'AMD64' and platform_machine != 'aarch64' and platform_machine != 'arm64' and platform_machine != 'ppc64le' and platform_machine != 'riscv64' and platform_machine != 'x86_64' and extra == 'test'", specifier = ">=3.1" },
+    { name = "psycopg", extras = ["binary"], marker = "(platform_machine == 'AMD64' and extra == 'consumer') or (platform_machine == 'aarch64' and extra == 'consumer') or (platform_machine == 'arm64' and extra == 'consumer') or (platform_machine == 'ppc64le' and extra == 'consumer') or (platform_machine == 'riscv64' and extra == 'consumer') or (platform_machine == 'x86_64' and extra == 'consumer')", specifier = ">=3.1" },
+    { name = "psycopg", extras = ["binary"], marker = "(platform_machine == 'AMD64' and extra == 'dev') or (platform_machine == 'aarch64' and extra == 'dev') or (platform_machine == 'arm64' and extra == 'dev') or (platform_machine == 'ppc64le' and extra == 'dev') or (platform_machine == 'riscv64' and extra == 'dev') or (platform_machine == 'x86_64' and extra == 'dev')", specifier = ">=3.1" },
+    { name = "psycopg", extras = ["binary"], marker = "(platform_machine == 'AMD64' and extra == 'test') or (platform_machine == 'aarch64' and extra == 'test') or (platform_machine == 'arm64' and extra == 'test') or (platform_machine == 'ppc64le' and extra == 'test') or (platform_machine == 'riscv64' and extra == 'test') or (platform_machine == 'x86_64' and extra == 'test')", specifier = ">=3.1" },
     { name = "pytest", marker = "extra == 'dev'" },
+    { name = "pytest", marker = "extra == 'test'" },
     { name = "pytest-cov", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "twine", marker = "extra == 'dev'" },
 ]
-provides-extras = ["consumer", "dev", "http", "mqtt"]
+provides-extras = ["consumer", "dev", "http", "mqtt", "test"]
 
 [[package]]
 name = "tomli"
