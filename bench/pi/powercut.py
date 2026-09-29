@@ -138,18 +138,28 @@ def main() -> None:
     print(f"power-cut test: {cycles} cycles, synchronous={synchronous}, seed={seed}", flush=True)
     ssh(host, "rm -rf ~/spoolpi-powercut && sync")
     results = []
+    stopped = ""
     for i in range(cycles):
-        r = cycle(host, i, synchronous, rng)
+        try:
+            r = cycle(host, i, synchronous, rng)
+        except TimeoutError as e:
+            # The Pi didn't come back: stop rather than lose track of it; keep what we have.
+            stopped = f"; STOPPED at cut {i}: {e}"
+            break
         results.append(r)
         print(json.dumps(r), flush=True)
+    if not results:
+        print(f"SUMMARY synchronous={synchronous}: no completed cuts{stopped}", flush=True)
+        sys.exit(1)
     lost = [int(r["lost"]) for r in results]  # type: ignore[call-overload]
     bad = [r for r in results if r["integrity"] != "ok"]
     print(
-        f"SUMMARY synchronous={synchronous}: {cycles} cuts, lost committed readings "
+        f"SUMMARY synchronous={synchronous}: {len(results)} cuts, lost committed readings "
         f"max {max(lost)}, mean {sum(lost) / len(lost):.1f}, cuts with any loss "
-        f"{sum(1 for x in lost if x)}; integrity failures {len(bad)}",
+        f"{sum(1 for x in lost if x)}; integrity failures {len(bad)}{stopped}",
         flush=True,
     )
+    sys.exit(1 if stopped else 0)
 
 
 if __name__ == "__main__":

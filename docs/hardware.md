@@ -47,20 +47,46 @@ buffer, and the checker then created an empty database file itself. Two fixes:
 
 ## Memory (`bench/pi/rss.py`)
 
-`spoolpi run` with the jsonl sink, fed 10 sensors × 1 Hz on stdin for 5 minutes:
+`spoolpi run` fed 10 sensors × 1 Hz on stdin for 5 minutes (`bench/pi/rss.py 300 10 1 <sink>`):
 
-| | RSS |
-|---|---|
-| after 60 s | 23.8 MB |
-| after 5 min | 24.0 MB |
-| **peak (VmHWM)** | **24.0 MB** (target: < 30 MB) |
+| | jsonl sink | MQTT sink |
+|---|---|---|
+| after 60 s | 23.8 MB | 28.0 MB |
+| after 5 min | 24.0 MB | 28.2 MB |
+| **peak (VmHWM)** | **24.0 MB** | **28.2 MB** (target: < 30 MB) |
+| threads | 3 | 4 (+ paho's network loop) |
+| delivered | 3,000 / 3,000 | 3,000 / 3,000 |
 
-- It ran 3 threads (main, shipper, clock anchor) and delivered all 3,000 readings.
-- Memory grew +0.18 MB after warm-up, consistent with SQLite's 2 MB page cache filling. The
-  seven-day run will confirm there's no leak.
-- The MQTT sink (which adds paho) isn't measured on the Pi yet. On x86 it adds 3.5 MB over jsonl
-  (26.6 vs 23.1 MB), so expect ~27.5 MB on the Zero. `bench/pi/rss.py 300 10 1 mqtt` measures
-  it against a local mosquitto (`bash bench/pi/install_test_tools.sh` unpacks one without root).
+- **Both meet the target. MQTT is close:** 1.8 MB of headroom. paho and its network thread add
+  ~4 MB.
+- **Memory grew ~0.2 MB after warm-up in both,** consistent with SQLite's 2 MB page cache
+  filling. The seven-day run will confirm there's no leak.
+- The MQTT run published to a mosquitto on the Pi itself. `bash bench/pi/install_test_tools.sh`
+  unpacks one without root, and the MQTT integration tests pass against it on ARM (14/14).
+
+## Clock without an RTC (`bench/pi/clock_coldboot.py`)
+
+The Zero has no RTC. It boots at the last saved clock and steps when NTP syncs. The test
+simulates that with the real `systemd-timesyncd`:
+1. NTP off, and the clock set 30 days back (the kernel then reports it unsynced).
+2. SpoolPi runs for 60 s at 10 sensors × 1 Hz.
+3. NTP on. It stepped the clock within 0.2 s here (on a LAN with internet).
+4. Another 60 s of readings.
+
+The wall-clock error of each delivered reading is measured against the post-sync offset
+(`wall_ns − mono_ns`):
+
+| Scenario | ts 0 (unsynced) | ts 1 (corrected) | ts 2 (synced) |
+|---|---|---|---|
+| **online**: uplink up before sync (jsonl) | **640, all 30 days wrong** | 10, error 3 µs | 590, error ≤ 5 µs |
+| **offline**: uplink only after sync (MQTT, broker started after the step) | **0** | 650, error ≤ 3 µs | 590, error ≤ 8 µs |
+
+- **Correction is exact:** 3 µs against a real 30-day NTP step. It applies whenever the readings
+  are still buffered at sync time.
+- **Readings shipped before sync stay wrong.** With the uplink up first, every pre-sync reading
+  except the last unsent batch shipped 30 days off, marked `ts_quality = 0`. On an RTC-less Pi on
+  a LAN, that's every boot until timesyncd syncs. See the time section in
+  [`guarantees.md`](guarantees.md#time).
 
 ## Power cuts (`bench/pi/powercut.py`)
 
@@ -105,12 +131,35 @@ pi ALL=(root) NOPASSWD: /usr/bin/tee /proc/sysrq-trigger, /usr/bin/systemctl * s
 - The design bound (~1,000 records) held with room to spare. The typical loss is the ~30 s
   writeback window, not the bound.
 
-**The Pi didn't come back from the 11th reset.** It fell off the network (no ping, no ARP entry)
-and needed a manual power cycle. The cause is still unknown, and it may be specific to sysrq
-resets. Either way, it ended the run after 10 cuts.
+### `synchronous=FULL`, seed 12
 
-The `FULL` comparison run hasn't happened yet. Following the latency measurements above, `FULL`
-should lose at most the uncommitted batch (~1 s).
+| Cut | Ran | Committed (reported) | Survived | Lost | Integrity |
+|---|---|---|---|---|---|
+| 0 | 60 s | 600 | 600 | 0 | ok |
+| 1 | 81 s | 805 | 805 | 0 | ok |
+| 2 | 82 s | 816 | 816 | 0 | ok |
+| 3 | 21 s | 211 | 211 | 0 | ok |
+
+- **Every committed reading survived every cut.** That includes the 21 s cut, a length that
+  lost everything under `NORMAL`.
+- Only the uncommitted batch can be lost. At 10 readings/s that's up to 1 s, as for a process
+  crash.
+- It's only 4 cuts, but they agree with how `FULL` works: every commit fsyncs the WAL before it
+  returns.
+
+### The Pi sometimes doesn't come back from a reset
+
+It happened twice: after the 11th reset in the `NORMAL` run, and after the 5th in the `FULL` run.
+Both times:
+- the Pi dropped off the network (no ping, no ARP or DHCP entry);
+- the green LED flickered at boot, then stopped;
+- only a manual power cycle brought it back.
+
+The first time, the card was reflashed without a diagnosis. The boot partition was intact, with
+`fsck.repair=yes` already set. The cause is not known yet; see the plan's open questions.
+
+The power-cut controller now stops when the Pi doesn't return within 5 minutes, and keeps the
+cuts completed so far.
 
 Still to do: real plug pulls. A sysrq reset keeps the SD card powered, so the card's own write
 cache survives; a plug pull doesn't.
