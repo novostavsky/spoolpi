@@ -51,9 +51,11 @@ and real plug pulls, memory (< 30 MB), and a real NTP step. See `docs/hardware.m
   back to plain `psycopg` there, which needs the system's `libpq5`.
 
 ### Known limitations
-- Power-cut safety is measured on one Pi and one SD card: 25 simulated cuts and 5 real plug
-  pulls, 0 committed readings lost. Cards that acknowledge writes early may do worse; check
-  yours with `bench/pi/powercut.py --manual`.
-- No schema migrations: an upgrade that changes the buffer schema needs an empty buffer.
-- Quarantined records can't be re-sent.
-- One writer process per buffer.
+All seven, with workarounds, are in [`docs/roadmap.md`](docs/roadmap.md). In short:
+- no buffer schema migrations;
+- quarantined records can't be re-sent;
+- one writer process per buffer;
+- `spoolpi status` counts only buffered discards;
+- the consumer's throughput is unbenchmarked;
+- the fake source restarts at 0;
+- power-cut safety is measured on one Pi and one card.

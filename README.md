@@ -103,6 +103,7 @@ host = "broker.example.org"
 | [Motivation](docs/motivation.md) | the crash experiments behind the headline numbers |
 | [Hardware](docs/hardware.md) | measurements on a Raspberry Pi Zero 2 W: SD-card commit latency, memory, ARM test run |
 | [CI](docs/ci.md) | how SpoolPi itself is tested |
+| [Roadmap](docs/roadmap.md) | known limitations of v0.1, with workarounds, and what may come next |
 | [Changelog](CHANGELOG.md) | |
 
 ## Receiving data
