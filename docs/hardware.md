@@ -70,7 +70,8 @@ The Zero has no RTC. It boots at the last saved clock and steps when NTP syncs. 
 simulates that with the real `systemd-timesyncd`:
 1. NTP off, and the clock set 30 days back (the kernel then reports it unsynced).
 2. SpoolPi runs for 60 s at 10 sensors × 1 Hz.
-3. NTP on. It stepped the clock within 0.2 s here (on a LAN with internet).
+3. NTP on. The clock read as synced at the first check after `timedatectl set-ntp true`
+   returned (on a LAN with internet), so this doesn't measure a realistic time-to-sync.
 4. Another 60 s of readings.
 
 The wall-clock error of each delivered reading is measured against the post-sync offset
@@ -153,10 +154,12 @@ It happened twice: after the 11th reset in the `NORMAL` run, and after the 5th i
 Both times:
 - the Pi dropped off the network (no ping, no ARP or DHCP entry);
 - the green LED flickered at boot, then stopped;
-- only a manual power cycle brought it back.
+- power cycles didn't bring it back, so something on the card stayed broken.
 
 The first time, the card was reflashed without a diagnosis. The boot partition was intact, with
-`fsck.repair=yes` already set. The cause is not known yet; see the plan's open questions.
+`fsck.repair=yes` already set. The cause is not known yet. The prime suspect is a system file
+caught half-written, since the resets landed 45–160 s after boot, while boot-time writes were
+still in the page cache.
 
 The power-cut controller now stops when the Pi doesn't return within 5 minutes, and keeps the
 cuts completed so far.
