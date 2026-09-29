@@ -19,6 +19,7 @@ import time
 from spoolpi.core.buffer import BatchWriter, Buffer
 from spoolpi.core.clock import BOOT_ID, mono_ns, wall_ns
 from spoolpi.core.reading import Reading
+from tests.harness.crash import READY
 
 
 def shipper(db: str) -> None:
@@ -43,6 +44,7 @@ def main() -> None:
     db, start, block_size = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
     buf = Buffer(db, seq_block_size=block_size)
     buf.recover_inflight()
+    os.write(1, READY)  # the harness may start its kill timer from here
     threading.Thread(target=shipper, args=(db,), daemon=True).start()
     writer = BatchWriter(buf, max_rows=7, max_delay_s=0.05)
     n = start

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import random
-import sqlite3
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,7 +9,13 @@ from pathlib import Path
 import pytest
 
 from spoolpi.core.buffer import INFLIGHT
-from tests.harness.crash import crash_seed, run_until_killed
+from tests.harness.crash import (
+    crash_seed,
+    has_table,
+    open_if_created,
+    run_until_killed,
+    wait_for_ready,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_ROWS = 20
@@ -36,21 +41,25 @@ def _verify_cycle(db: Path, start: int, log: Path, tally: Tally) -> None:
     last_written = _last(lines, "w", start - 1)
     last_committed = _last(lines, "c", start - 1)
 
-    conn = sqlite3.connect(db)
-    try:
-        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-        steps = sorted(
-            int(v)
-            for (v,) in conn.execute(
-                "SELECT value FROM readings WHERE value >= ? AND value < ?",
-                (start, start + SPAN),
-            )
-        )
-        inflight = conn.execute(
-            "SELECT count(*) FROM readings WHERE state = ?", (INFLIGHT,)
-        ).fetchone()[0]
-    finally:
-        conn.close()
+    steps: list[int] = []
+    inflight = 0
+    conn = open_if_created(db)  # None: killed before it created the buffer
+    if conn is not None:
+        try:
+            assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            if has_table(conn, "readings"):
+                steps = sorted(
+                    int(v)
+                    for (v,) in conn.execute(
+                        "SELECT value FROM readings WHERE value >= ? AND value < ?",
+                        (start, start + SPAN),
+                    )
+                )
+                inflight = conn.execute(
+                    "SELECT count(*) FROM readings WHERE state = ?", (INFLIGHT,)
+                ).fetchone()[0]
+        finally:
+            conn.close()
 
     stored_last = start + len(steps) - 1
     assert steps == list(range(start, stored_last + 1)), "gap or duplicate inside a cycle"
@@ -82,7 +91,9 @@ def _run(tmp_path: Path, cycles: int, seed: int) -> Tally:
             str(MAX_ROWS),
             str(WAL_AUTOCHECKPOINT),
         ]
-        run_until_killed(argv, rng.uniform(0.05, 0.5), cwd=ROOT, stdout_path=log)
+        run_until_killed(
+            argv, rng.uniform(0.05, 0.5), cwd=ROOT, stdout_path=log, after_ready=wait_for_ready(rng)
+        )
         _verify_cycle(db, start, log, tally)
     return tally
 

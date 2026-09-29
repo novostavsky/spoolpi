@@ -24,6 +24,7 @@ from spoolpi.core.buffer import BatchWriter, Buffer
 from spoolpi.core.clock import BOOT_ID, mono_ns, wall_ns
 from spoolpi.core.reading import Reading
 from spoolpi.core.retention import Policy, Retention
+from tests.harness.crash import READY
 
 
 def report(tag: str, step: int) -> None:
@@ -52,6 +53,7 @@ def main() -> None:
     retention = Retention(Policy.DROP_OLDEST, cap) if cap else None
     buf = Buffer(db, wal_autocheckpoint=ckpt, retention=retention)
     buf.recover_inflight()
+    os.write(1, READY)  # the harness may start its kill timer from here
     threading.Thread(target=shipper, args=(db, ckpt), daemon=True).start()
 
     writer = BatchWriter(buf, max_rows=max_rows, max_delay_s=0.05)

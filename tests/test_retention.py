@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import random
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -23,7 +22,13 @@ from spoolpi.core.retention import (
 )
 from spoolpi.core.shipper import Shipper
 from spoolpi.sinks.memory import MemorySink, Raise
-from tests.harness.crash import crash_seed, run_until_killed
+from tests.harness.crash import (
+    crash_seed,
+    has_table,
+    open_if_created,
+    run_until_killed,
+    wait_for_ready,
+)
 from tests.shipping import FAST_BACKOFF, assert_invariants, drain, gap_envelopes
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -240,20 +245,25 @@ def _crash_cycles(tmp_path: Path, cycles: int, seed: int) -> None:
         start = i * SPAN
         argv = [sys.executable, "-m", "tests.harness.buffer_child", str(db), str(start)]
         argv += ["20", "50", str(CAP)]
-        run_until_killed(argv, rng.uniform(0.05, 0.5), cwd=ROOT, stdout_path=log)
-        conn = sqlite3.connect(db)
-        try:
-            assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-            # drop_oldest keeps the newest rows, so this cycle's last commit survives.
-            (newest,) = conn.execute(
-                "SELECT max(value) FROM readings WHERE value >= ? AND value < ?",
-                (start, start + SPAN),
-            ).fetchone()
-            committed += 0 if newest is None else int(newest) - start + 1
-            (rows,) = conn.execute("SELECT count(*) FROM readings").fetchone()
-            (dropped,) = conn.execute("SELECT coalesce(sum(count), 0) FROM gaps").fetchone()
-        finally:
-            conn.close()
+        run_until_killed(
+            argv, rng.uniform(0.05, 0.5), cwd=ROOT, stdout_path=log, after_ready=wait_for_ready(rng)
+        )
+        rows = dropped = 0
+        conn = open_if_created(db)  # None: killed before it created the buffer
+        if conn is not None:
+            try:
+                assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+                if has_table(conn, "readings"):
+                    # drop_oldest keeps the newest rows, so this cycle's last commit survives.
+                    (newest,) = conn.execute(
+                        "SELECT max(value) FROM readings WHERE value >= ? AND value < ?",
+                        (start, start + SPAN),
+                    ).fetchone()
+                    committed += 0 if newest is None else int(newest) - start + 1
+                    (rows,) = conn.execute("SELECT count(*) FROM readings").fetchone()
+                    (dropped,) = conn.execute("SELECT coalesce(sum(count), 0) FROM gaps").fetchone()
+            finally:
+                conn.close()
         assert rows + dropped == committed, f"cycle {i}: {rows} kept + {dropped} dropped"
 
 

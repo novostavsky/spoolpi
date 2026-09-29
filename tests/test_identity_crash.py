@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import random
-import sqlite3
 import sys
 from pathlib import Path
 
 import pytest
 
-from tests.harness.crash import crash_seed, run_until_killed
+from tests.harness.crash import (
+    crash_seed,
+    has_table,
+    open_if_created,
+    run_until_killed,
+    wait_for_ready,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 SPAN = 1_000_000
@@ -17,13 +22,16 @@ BLOCK_SIZE = 50  # small, so most cycles cross block boundaries and restarts was
 def _collect(db: Path, log: Path, seq_to_step: dict[int, int]) -> None:
     pairs = []
     for line in log.read_text().splitlines():
-        _, seq, step = line.split()
-        pairs.append((int(seq), int(step)))
-    conn = sqlite3.connect(db)
-    try:
-        pairs += [(s, int(v)) for s, v in conn.execute("SELECT seq, value FROM readings")]
-    finally:
-        conn.close()
+        if line.startswith("s "):  # skip the "ready" line
+            _, seq, step = line.split()
+            pairs.append((int(seq), int(step)))
+    conn = open_if_created(db)  # None: killed before it created the buffer
+    if conn is not None:
+        try:
+            if has_table(conn, "readings"):
+                pairs += [(s, int(v)) for s, v in conn.execute("SELECT seq, value FROM readings")]
+        finally:
+            conn.close()
     for seq, step in pairs:
         # Resending the same row under the same seq is fine (at-least-once);
         # the same seq on a different row is a collision at the sink.
@@ -38,7 +46,9 @@ def _run(tmp_path: Path, cycles: int, seed: int) -> dict[int, int]:
     for i in range(cycles):
         argv = [sys.executable, "-m", "tests.harness.seq_child", str(db), str(i * SPAN)]
         argv.append(str(BLOCK_SIZE))
-        run_until_killed(argv, rng.uniform(0.1, 0.5), cwd=ROOT, stdout_path=log)
+        run_until_killed(
+            argv, rng.uniform(0.1, 0.5), cwd=ROOT, stdout_path=log, after_ready=wait_for_ready(rng)
+        )
         _collect(db, log, seq_to_step)
     return seq_to_step
 
