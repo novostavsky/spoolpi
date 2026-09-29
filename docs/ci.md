@@ -13,7 +13,7 @@ ci/run.sh lint         # ruff format --check, ruff check, mypy --strict on src/s
 ci/run.sh test 3.11    # the fast suite on one Python version
 ci/run.sh package      # build; twine check --strict; wheel contents; clean venv -> "only spoolpi installed" -> spoolpi check / run
 ci/run.sh crash        # SIGKILL suites: 1,000 (buffer) / 100 (seq) / 300 (retention) cycles
-ci/run.sh nightly      # crash suites at 10,000 cycles (~60 min)
+ci/run.sh nightly      # crash suites at 10,000 cycles (~55 min, extrapolated from 2,000)
 ci/run.sh last         # summary of the most recent run
 ```
 
@@ -36,6 +36,16 @@ ci/run.sh last         # summary of the most recent run
   ```
 
   `SPOOLPI_CRASH_CYCLES` changes the buffer suite's cycle count.
+- **How the buffer crash suite checks.** After every cycle it checks only that cycle's rows,
+  found through the `seq` index: gap-free, no committed reading lost, at most one batch of
+  unreported ones. The full checks read the whole growing database: `integrity_check`, plus an
+  audit that every earlier cycle still holds exactly its rows, once each.
+  - **Up to 1,000 cycles** (every CI run), they also run after every cycle.
+  - **Longer runs** do them every 100 cycles and after the last one. Otherwise the run is
+    quadratic: 10,000 cycles took 7,042 s that way.
+  - **Nothing escapes:** corruption and missing rows persist, so the next full check catches
+    them. Replaying the seed finds the cycle that caused them.
+  - The audit is itself tested with a planted missing row and a planted duplicate.
 
 ## What runs when
 
@@ -44,7 +54,7 @@ ci/run.sh last         # summary of the most recent run
 | every commit | `lint` (~10 s) | `.githooks/pre-commit` |
 | every push | `quick` (~1.5 min) | `.githooks/pre-push`, active once a remote exists |
 | before milestone commits | `all` (~12 min) | by hand |
-| daily 03:00 | `nightly` (~60 min) | systemd user timer |
+| daily 03:00 | `nightly` (~55 min) | systemd user timer |
 
 The hooks are enabled per clone with `git config core.hooksPath .githooks`. In an emergency,
 `git commit --no-verify` skips them.
@@ -53,6 +63,11 @@ Install the nightly timer with `ci/run.sh install-nightly`. It uses `Persistent=
 runs while Windows is up and the distro is started, so a missed night runs at the next start.
 It's "nightly when the machine is on", which is the honest limit of local CI and the main
 reason to move to GitHub.
+
+**Nothing notifies you when the nightly fails.** Check it with `ci/run.sh last`, or look under
+`.ci/logs/*-nightly/`. The first two nightlies (09-28, 09-29) failed or were cut off, and it
+went unnoticed for a day. The first green 10,000-cycle run was 09-29: seed 1125858416, 1,131,936
+rows, 0 corruption, 0 lost commits.
 
 ## Test dependencies
 

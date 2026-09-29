@@ -95,18 +95,16 @@ What neither design can do is keep readings that were sampled but not yet commit
 process died. In both, that window is at most one commit batch (15 readings here). SpoolPi
 documents it as its loss bound, and the M2 crash test checks it across 1,000 kills.
 
-## Caveats / not yet measured
+## Caveats
 
-Two Week 0 outputs from the plan are **not** in this report and need real Raspberry Pi
-hardware, not WSL2:
-
-- **Fsync latency on a real SD card.** WSL2's ext4 runs on a virtual disk backed by the Windows
-  host's NVMe/SSD, which is nothing like SD card write latency. The measured 0% loss/corruption
-  rate here should not be read as "SQLite is safe on the target hardware" — only that this
-  particular crash mechanism (`SIGKILL` on a fast disk) doesn't corrupt it. The batch-size
-  default (plan §1) still needs a real SD card measurement.
-- **NTP clock-step / 1970-timestamp count.** Requires booting a Pi with no network, sampling,
-  then reconnecting and observing the step. Not reproducible in a WSL2 VM, which shares the
-  Windows host clock and doesn't independently run `systemd-timesyncd` against a cold start.
-
-Both are tracked as follow-ups before the M1 clock-anchor default is finalized.
+These experiments ran on WSL2, whose ext4 sits on a virtual disk backed by the host's NVMe SSD.
+They show that this crash mechanism (`SIGKILL` on a fast disk) doesn't corrupt SQLite. They
+don't show how an SD card behaves under power loss, or how many readings a cold boot stamps
+wrongly. Both were measured afterwards on a Raspberry Pi Zero 2 W
+([`hardware.md`](hardware.md)):
+- **SD-card commit latency:** 3.8 ms per default commit (13 ms with the power-safe default), so
+  the batch defaults stand.
+- **Power cuts:** 25 simulated cuts and 5 real plug pulls lost no committed readings with
+  `durability = "power"`.
+- **A real NTP step after a cold boot:** 30 days, corrected to 3 µs. With the unsynced-reading
+  hold, no pre-sync reading shipped with the wrong time.
