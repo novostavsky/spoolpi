@@ -148,21 +148,73 @@ pi ALL=(root) NOPASSWD: /usr/bin/tee /proc/sysrq-trigger, /usr/bin/systemctl * s
 - It's only 4 cuts, but they agree with how `FULL` works: every commit fsyncs the WAL before it
   returns.
 
-### The Pi sometimes doesn't come back from a reset
+### A power cut after boot left the Pi without Wi-Fi for good
 
-It happened twice: after the 11th reset in the `NORMAL` run, and after the 5th in the `FULL` run.
-Both times:
-- the Pi dropped off the network (no ping, no ARP or DHCP entry);
-- the green LED flickered at boot, then stopped;
-- power cycles didn't bring it back, so something on the card stayed broken.
+**What happened.** Twice during the power-cut runs, the Pi stopped coming back: after the 11th
+reset of the `NORMAL` run, and after the 5th of the `FULL` run on a freshly flashed card. Both
+times:
+- it never reappeared on the network (no ping, no ARP entry, no DHCP lease);
+- the green LED flickered at boot, then went quiet;
+- repeated power cycles didn't help, so the damage was stored on the card.
 
-The first time, the card was reflashed without a diagnosis. The boot partition was intact, with
-`fsck.repair=yes` already set. The cause is not known yet. The prime suspect is a system file
-caught half-written, since the resets landed 45–160 s after boot, while boot-time writes were
-still in the page cache.
+The first card was reflashed without a diagnosis. The second was examined.
 
-The power-cut controller now stops when the Pi doesn't return within 5 minutes, and keeps the
-cuts completed so far.
+**How it was examined.** The card was attached to WSL through `usbipd` and locked read-only at
+the block level (`blockdev --setro`), so that nothing would change it during the investigation.
+Then:
+- `e2fsck -fn` (check only) found a healthy filesystem: a wrong free-block count and an orphan
+  flag, both normal after an unclean power-off, and nothing else.
+- The partition was mounted `ro,noload`, so the journal wasn't replayed; replaying it would have
+  written to the card.
+- The system journal had nothing to offer: this image keeps it in memory only
+  (`Storage=volatile`).
+- `/var/log/cloud-init.log`, which is written on every boot, gave the timeline instead:
+
+| Boot (UTC) | What it was | Wait for the network in cloud-init's `init` stage |
+|---|---|---|
+| 10:05, 10:07, 10:10, 10:11 | after `FULL` cuts 0–3; came back | ~21 s |
+| **10:13** | after the reset for cut 4; didn't come back | **~7 s** |
+| 11:13, 11:28 | manual power cycles; didn't come back | ~7 s |
+
+cloud-init's own work was identical in good and bad boots, and `wlan0` existed in both, so the
+Wi-Fi driver loaded. The bad boots simply had no connection to wait for.
+
+**The cause.** Both of NetworkManager's connection profiles were empty files:
+
+```
+/etc/netplan/90-NM-5098e2cc-….yaml   0 bytes   modified 10:12:01 UTC   (Wi-Fi)
+/etc/netplan/90-NM-75a1216a-….yaml   0 bytes   modified 10:11:57 UTC   (Ethernet)
+/etc/NetworkManager/system-connections/   empty
+```
+
+On Raspberry Pi OS trixie, NetworkManager stores its profiles as netplan YAML in `/etc/netplan/`.
+In the boot after cut 3, about 26–30 s after power-on, it rewrote both files. The reset for cut 4
+landed seconds later, inside the kernel's ~30 s writeback window. The files' truncation reached
+the card and their new contents didn't. Every boot after that started with no network
+configuration at all, which is why power cycles didn't help. This is the same writeback window
+that costs SpoolPi readings under `synchronous=NORMAL`, hitting an OS file instead.
+
+The first failure had the same symptoms and was almost certainly the same. That card was
+reflashed, though, so it's unconfirmed.
+
+**The repair.** Imager's copy of the network settings survives on the boot partition as
+`network-config`, already in netplan format. The fix:
+1. Move the two empty files to `/var/backups/netplan-broken-2026-09-29/` as evidence.
+2. Install `network-config` as `/etc/netplan/50-cloud-init.yaml`, mode 600, since it contains
+   the Wi-Fi password.
+3. `sync`, and check the card again with `e2fsck -fn`: clean.
+
+**What it means.**
+- **For SpoolPi:** nothing changes. Its buffer passed `integrity_check` after every cut, including
+  the one that broke the network.
+- **For devices in the field:** on this OS, a power cut in the first ~minute after boot can
+  disable networking until someone repairs or reflashes the card. A supply that drops out twice
+  within a minute is enough. [`operations.md`](operations.md#power-cuts) says how to avoid it and
+  how to recover.
+- **For the test:** the controller now waits for the boot to finish
+  (`systemctl is-system-running --wait`) and runs `sync` before each run. That way a cut measures
+  SpoolPi's writes, not the OS's boot-time writes. It also stops when the Pi doesn't return within
+  5 minutes, keeping the cuts completed so far.
 
 Still to do: real plug pulls. A sysrq reset keeps the SD card powered, so the card's own write
 cache survives; a plug pull doesn't.

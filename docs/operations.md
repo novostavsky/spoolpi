@@ -61,6 +61,38 @@ device loses power often, size your expectations to that. Where possible, give i
 shutdown path (a UPS HAT, or a supercapacitor with a shutdown signal), because
 `systemctl stop` loses nothing.
 
+**The operating system is more fragile than the buffer.** In testing on Raspberry Pi OS trixie, a
+power cut shortly after boot left the Pi permanently without Wi-Fi. NetworkManager rewrites its
+connection files in `/etc/netplan/` during boot. The cut landed before the new contents reached
+the card, leaving them empty, and every later boot came up with no network. SpoolPi's buffer was
+intact, but a device that can't connect ships nothing. The full account is in
+[`hardware.md`](hardware.md#a-power-cut-after-boot-left-the-pi-without-wi-fi-for-good).
+
+For devices that can lose power:
+- **Make the root filesystem read-only** (`sudo raspi-config` → Performance → Overlay File
+  System). Writes to `/` then go to RAM and disappear at reboot, so a cut can't damage the system.
+  Keep the buffer on a separate writable partition, and point `[buffer] path` at it, or SpoolPi
+  loses everything at every reboot.
+- **Otherwise, avoid cuts in the first minute after boot** where you can, e.g. with a
+  supercapacitor that rides out short drop-outs.
+- **Keep `fsck.repair=yes`** in `/boot/firmware/cmdline.txt`; it's on by default. It repairs
+  filesystem damage, but can't bring back a file that was saved empty.
+
+**Recovering a Pi that lost its network this way.** Symptoms: it boots (the green LED flickers,
+then stops) but never joins the network, and power cycles don't help.
+1. Put the card in a Linux machine (a WSL distro works, with `usbipd` for a USB reader) and
+   mount the root partition.
+2. Check `/etc/netplan/`. If the `90-NM-*.yaml` files are 0 bytes, move them aside.
+3. If the Pi was set up with Raspberry Pi Imager, the boot partition has the original settings
+   as `network-config`:
+
+   ```sh
+   sudo install -m 600 /path/to/bootfs/network-config /path/to/rootfs/etc/netplan/50-cloud-init.yaml
+   sync
+   ```
+
+   Otherwise, write a netplan file with your Wi-Fi settings.
+
 ### Clock
 
 SpoolPi doesn't need the clock to be right. It needs to know *whether* it's right. Keep

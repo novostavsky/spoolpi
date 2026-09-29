@@ -69,6 +69,10 @@ def boot_id(host: str) -> str:
 
 def cycle(host: str, i: int, synchronous: str, rng: random.Random) -> dict[str, object]:
     start = i * SPAN
+    # Let the boot finish and get its own writes onto the card first. Otherwise a cut can
+    # land in the OS's boot-time writes: on 09-29 one left NetworkManager's netplan files
+    # empty and the Pi without Wi-Fi for good (docs/hardware.md). We test SpoolPi, not that.
+    ssh(host, "systemctl is-system-running --wait >/dev/null; sync", timeout=300)
     boot_before = boot_id(host)
     child = subprocess.Popen(
         [
