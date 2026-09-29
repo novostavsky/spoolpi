@@ -33,7 +33,9 @@ def proc_status(pid: int) -> dict[str, int]:
 
 def spoolpi_pid() -> int | None:
     r = subprocess.run(
-        ["pgrep", "-f", "-o", "spoolpi run /etc/spoolpi/spoolpi.toml"],
+        # The Python process itself: the unit's /bin/sh wrapper has the same words in
+        # its command line (the first sample, 09-29, measured the wrapper by mistake).
+        ["pgrep", "-f", "-o", "python[0-9.]* .*spoolpi run /etc/spoolpi/spoolpi.toml"],
         capture_output=True,
         text=True,
         check=False,
@@ -72,7 +74,8 @@ def main() -> None:
     sample["uptime_s"] = round(float(Path("/proc/uptime").read_text().split()[0]))
     sample["boot_id"] = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
     pid = spoolpi_pid()
-    sample["spoolpi"] = {"pid": pid, **(proc_status(pid) if pid else {})}
+    comm = Path(f"/proc/{pid}/comm").read_text().strip() if pid else None
+    sample["spoolpi"] = {"pid": pid, "comm": comm, **(proc_status(pid) if pid else {})}
     sample["units"] = {
         u: unit(u, "ActiveState", "NRestarts")
         for u in ("spoolpi.service", "mosquitto.service", "spoolpi-soak-receiver.service")

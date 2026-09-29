@@ -96,7 +96,9 @@ def main() -> None:
         else []
     )
     if samples:
-        sp = [s["spoolpi"] for s in samples if s["spoolpi"].get("VmRSS")]
+        # Only samples of the Python process (comm "spoolpi"); the first sample of the
+        # 09-29 run measured the unit's /bin/sh wrapper and has no "comm".
+        sp = [s["spoolpi"] for s in samples if s["spoolpi"].get("comm") == "spoolpi"]
 
         def mb(key: str) -> str:
             v = [x[key] / 1024 for x in sp]
