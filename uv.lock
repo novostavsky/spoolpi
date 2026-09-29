@@ -1239,7 +1239,7 @@ wheels = [
 ]
 
 [[package]]
-name = "spool"
+name = "spoolpi"
 source = { editable = "." }
 
 [package.optional-dependencies]

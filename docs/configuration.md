@@ -1,19 +1,19 @@
 # Configuration
 
-Spool reads one TOML file, given on the command line (`spool run /etc/spool/spool.toml`) or to
-`Spool.from_config(...)`. Relative paths in it are resolved against the file's own directory.
-`spool check <file>` validates it without starting anything.
+SpoolPi reads one TOML file, given on the command line (`spoolpi run /etc/spoolpi/spoolpi.toml`) or to
+`SpoolPi.from_config(...)`. Relative paths in it are resolved against the file's own directory.
+`spoolpi check <file>` validates it without starting anything.
 
 Every error names the file, the line and a fix, for example:
 
 ```
-/etc/spool/spool.toml:4: retention.policy is required and has no default: decide what happens
+/etc/spoolpi/spoolpi.toml:4: retention.policy is required and has no default: decide what happens
 when the buffer is full (drop the oldest readings, or stop and alarm)
   fix: add under [retention]: policy = "drop_oldest"   # or "halt_and_alarm"
 ```
 
 Unknown sections and keys are errors too (with a "did you mean"), so a typo can't silently
-fall back to a default. [`examples/spool.toml`](../examples/spool.toml) is a commented, valid
+fall back to a default. [`examples/spoolpi.toml`](../examples/spoolpi.toml) is a commented, valid
 starting point.
 
 Only `[buffer] path`, `[retention] policy` and `max_rows`, and `[sink] type` (plus that sink's
@@ -89,15 +89,15 @@ handing data to another local process, and for testing.
 ### type = "mqtt"
 
 One JSON message per record, QoS 1. A record counts as delivered when the broker's PUBACK
-arrives. Needs `spool[mqtt]`.
+arrives. Needs `spoolpi[mqtt]`.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `host` | *required* | Broker host name. |
 | `port` | `1883` | Broker port (usually 8883 with TLS). |
-| `topic` | `"spool/{device_id}/{type}/{sensor_id}"` | Topic template. Fields: `{device_id}`, `{buffer_id}`, `{type}` (`reading` or `gap`), `{sensor_id}` (`_all` for gaps covering all sensors). Values are percent-escaped, so `/`, `+` and `#` in a sensor name can't add levels or wildcards. |
-| `client_id` | `"spool-<device id>"` | MQTT client id. |
-| `protocol` | `"5"` | `"5"` or `"3.1.1"`. Only MQTT 5 lets the broker reject individual records (not authorized, bad topic, bad payload), which Spool then quarantines instead of retrying forever. |
+| `topic` | `"spoolpi/{device_id}/{type}/{sensor_id}"` | Topic template. Fields: `{device_id}`, `{buffer_id}`, `{type}` (`reading` or `gap`), `{sensor_id}` (`_all` for gaps covering all sensors). Values are percent-escaped, so `/`, `+` and `#` in a sensor name can't add levels or wildcards. |
+| `client_id` | `"spoolpi-<device id>"` | MQTT client id. |
+| `protocol` | `"5"` | `"5"` or `"3.1.1"`. Only MQTT 5 lets the broker reject individual records (not authorized, bad topic, bad payload), which SpoolPi then quarantines instead of retrying forever. |
 | `keepalive_s` | `60` | MQTT keepalive. |
 | `connect_timeout_s` | `3` | How long a send waits for a connection before failing. |
 | `ack_timeout_s` | `5` | How long a send waits for PUBACKs. `connect_timeout_s + ack_timeout_s` must be less than `[shipper] send_timeout_s` (checked). |
@@ -109,15 +109,15 @@ arrives. Needs `spool[mqtt]`.
 ### type = "http"
 
 One POST per batch; the receiver's response contract is in the
-[README](../README.md#receiving-data). Needs `spool[http]`.
+[README](../README.md#receiving-data). Needs `spoolpi[http]`.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `url` | *required* | `http://` or `https://` endpoint. Redirects are never followed. |
 | `timeout_s` | `5` | Request timeout. Must be less than `[shipper] send_timeout_s` (checked). |
-| `token_file` | none | File containing a bearer token, sent as `Authorization: Bearer <token>`. `spool check` warns if it would travel over plain `http://`. |
+| `token_file` | none | File containing a bearer token, sent as `Authorization: Bearer <token>`. `spoolpi check` warns if it would travel over plain `http://`. |
 | `ca_file` | system CAs | CA certificate for a private server certificate. |
-| `verify` | `true` | Verify the server's TLS certificate. Turning this off is warned about by `spool check`. |
+| `verify` | `true` | Verify the server's TLS certificate. Turning this off is warned about by `spoolpi check`. |
 | `gzip` | `false` | Gzip request bodies (`Content-Encoding: gzip`). Worth it on metered or cellular links. |
 
 ## [device]
@@ -128,10 +128,10 @@ One POST per batch; the receiver's response contract is in the
 
 ## [source]
 
-Where `spool run` gets readings from. Not used by the library.
+Where `spoolpi run` gets readings from. Not used by the library.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `type` | `"stdin"` | `"stdin"`: JSON lines such as `{"sensor_id": "t1", "value": 21.5, "unit": "C"}`; at end of input Spool delivers everything and exits. `"fake"`: a counting stream, for trying Spool out. Bad input lines are counted and skipped, never fatal. |
+| `type` | `"stdin"` | `"stdin"`: JSON lines such as `{"sensor_id": "t1", "value": 21.5, "unit": "C"}`; at end of input SpoolPi delivers everything and exits. `"fake"`: a counting stream, for trying SpoolPi out. Bad input lines are counted and skipped, never fatal. |
 | `sensor_id` | `"fake"` | Sensor id for the fake source. |
 | `rate_hz` | `10` | Readings per second for the fake source. |

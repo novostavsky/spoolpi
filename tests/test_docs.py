@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from spool import Spool
-from spool.config import _SCHEMA, load
+from spoolpi import SpoolPi
+from spoolpi.config import _SCHEMA, load
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = [ROOT / "README.md", ROOT / "CHANGELOG.md", *sorted((ROOT / "docs").glob("*.md"))]
@@ -56,12 +56,12 @@ def test_complete_toml_examples_load(doc: Path, tmp_path: Path) -> None:
         load(cfg)
 
 
-def test_documented_spool_methods_exist() -> None:
+def test_documented_spoolpi_methods_exist() -> None:
     doc = (ROOT / "docs" / "library.md").read_text()
-    names = re.findall(r"^\| `(?:Spool\.)?([a-z_]+)\(", doc, flags=re.MULTILINE)
+    names = re.findall(r"^\| `(?:SpoolPi\.)?([a-z_]+)\(", doc, flags=re.MULTILINE)
     assert names, "the method table moved?"
     for name in names:
-        assert hasattr(Spool, name), f"library.md documents Spool.{name}, which doesn't exist"
+        assert hasattr(SpoolPi, name), f"library.md documents SpoolPi.{name}, which doesn't exist"
 
 
 def test_documented_log_messages_exist() -> None:

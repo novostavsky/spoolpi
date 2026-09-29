@@ -1,0 +1,58 @@
+# SpoolPi config. Relative paths are resolved against this file's directory.
+
+[buffer]
+path = "/var/lib/spoolpi/buffer.db"
+
+[retention]
+# Required, no default: what happens when the buffer holds max_rows unshipped readings.
+#   "drop_oldest"    - discard the oldest pending readings to make room
+#   "halt_and_alarm" - refuse new readings until the uplink catches up
+# Either way the discarded readings are recorded as gap records and shipped.
+policy = "drop_oldest"
+max_rows = 1000000
+
+[batch]
+max_rows = 50       # readings per commit; a SIGKILL loses at most one batch
+max_delay_s = 1.0   # ...and at most this much time's worth of readings
+
+[shipper]
+batch_size = 100
+send_timeout_s = 10
+stop_timeout_s = 10  # keep below systemd's TimeoutStopSec
+immediate_retries = 2  # retry the first failures at once, then back off (0.5 s up to 60 s)
+
+[sink]
+type = "jsonl"
+path = "/var/lib/spoolpi/out.jsonl"
+
+# Or publish over MQTT (needs `spoolpi[mqtt]`). One JSON message per record, QoS 1;
+# a record counts as delivered on the broker's PUBACK. Consumers deduplicate on
+# (buffer_id, seq).
+# [sink]
+# type = "mqtt"
+# host = "broker.example.org"
+# port = 8883
+# tls = true
+# ca_file = "/etc/spoolpi/ca.pem"          # omit to use the system CA store
+# username = "spoolpi"
+# password_file = "/etc/spoolpi/mqtt-password"
+# topic = "spoolpi/{device_id}/{type}/{sensor_id}"   # fields: device_id, buffer_id, type, sensor_id
+# protocol = "5"                          # "3.1.1" works, but can't report rejected records
+
+# Or POST batches to an HTTP(S) endpoint (needs `spoolpi[http]`). See the README for
+# the response contract, including per-record accepted/rejected lists.
+# [sink]
+# type = "http"
+# url = "https://ingest.example.org/spoolpi"
+# token_file = "/etc/spoolpi/http-token"   # sent as "Authorization: Bearer <token>"
+# ca_file = "/etc/spoolpi/ca.pem"          # omit to use the system CA store
+# gzip = true                            # worth it on metered or cellular links
+# timeout_s = 5                          # must stay below [shipper] send_timeout_s
+
+# [device]
+# id = "greenhouse-1"   # default: derived from /etc/machine-id
+
+[source]
+# "stdin": JSON lines like {"sensor_id": "t1", "value": 21.5, "unit": "C"}
+# "fake":  a counting stream, for trying SpoolPi out
+type = "stdin"

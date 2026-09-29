@@ -19,8 +19,8 @@ from pathlib import Path
 
 
 def crash_seed() -> int:
-    """Seed for a crash-test run: random, or SPOOL_CRASH_SEED to replay a failure."""
-    if fixed := os.environ.get("SPOOL_CRASH_SEED"):
+    """Seed for a crash-test run: random, or SPOOLPI_CRASH_SEED to replay a failure."""
+    if fixed := os.environ.get("SPOOLPI_CRASH_SEED"):
         return int(fixed)
     return random.randrange(2**32)
 

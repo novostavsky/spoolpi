@@ -1,6 +1,6 @@
 """Check that `systemctl restart` loses nothing (plan §9: the unit survives restarts).
 
-Runs `spool run` with the fake source as a transient systemd user unit,
+Runs `spoolpi run` with the fake source as a transient systemd user unit,
 restarts it a few times, stops it, then checks every run's readings: each run
 counts 0, 1, 2, ... from its own seq block, and every value must be delivered
 to the jsonl sink or still be in the buffer, with no holes.
@@ -20,7 +20,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-UNIT = "spool-restart-check"
+UNIT = "spoolpi-restart-check"
 SEQ_BLOCK = 1000  # Buffer's default block size: each process starts a new block
 CONFIG = """\
 [buffer]
@@ -49,8 +49,8 @@ def systemctl(*args: str) -> None:
 
 def main() -> int:
     restarts = int(sys.argv[1]) if len(sys.argv) > 1 else 3
-    work = Path(tempfile.mkdtemp(prefix="spool-systemd-"))
-    (work / "spool.toml").write_text(CONFIG)
+    work = Path(tempfile.mkdtemp(prefix="spoolpi-systemd-"))
+    (work / "spoolpi.toml").write_text(CONFIG)
     subprocess.run(
         [
             "systemd-run",
@@ -61,9 +61,9 @@ def main() -> int:
             f"--working-directory={work}",
             sys.executable,
             "-m",
-            "spool",
+            "spoolpi",
             "run",
-            str(work / "spool.toml"),
+            str(work / "spoolpi.toml"),
         ],
         check=True,
     )

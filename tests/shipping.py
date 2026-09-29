@@ -6,12 +6,12 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from spool.core.buffer import INFLIGHT, PENDING, Buffer
-from spool.core.reading import Reading
-from spool.core.retention import GapRecord
-from spool.core.shipper import Backoff
-from spool.sinks.base import Envelope
-from spool.sinks.memory import MemorySink
+from spoolpi.core.buffer import INFLIGHT, PENDING, Buffer
+from spoolpi.core.reading import Reading
+from spoolpi.core.retention import GapRecord
+from spoolpi.core.shipper import Backoff
+from spoolpi.sinks.base import Envelope
+from spoolpi.sinks.memory import MemorySink
 
 FAST_BACKOFF = Backoff(initial_s=0.005, max_s=0.05)
 

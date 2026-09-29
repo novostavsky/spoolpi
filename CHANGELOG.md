@@ -23,16 +23,16 @@ Raspberry Pi hardware: SD-card fsync latency, power cuts, memory use.
   time.
 
 ### Sinks
-- `mqtt` (`spool[mqtt]`): QoS 1, acked on PUBACK, MQTT 5 per-record rejections, TLS,
+- `mqtt` (`spoolpi[mqtt]`): QoS 1, acked on PUBACK, MQTT 5 per-record rejections, TLS,
   password file, topic templates.
-- `http` (`spool[http]`): one POST per batch with a per-record accepted/rejected response
+- `http` (`spoolpi[http]`): one POST per batch with a per-record accepted/rejected response
   contract, gzip, bearer token, private CA.
 - `jsonl`: an fsynced local file.
 
 ### Tools
-- `spool run | check | status`, TOML config with file:line:fix errors, `spool --version`.
+- `spoolpi run | check | status`, TOML config with file:line:fix errors, `spoolpi --version`.
 - A systemd unit that survives `systemctl restart` without loss.
-- Reference consumer `python -m spool.consumer` (`spool[consumer]`): MQTT → Postgres, exactly
+- Reference consumer `python -m spoolpi.consumer` (`spoolpi[consumer]`): MQTT → Postgres, exactly
   once via `UNIQUE (buffer_id, seq)`, with a dead-letter table.
 
 ### Known limitations

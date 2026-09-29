@@ -8,14 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from spool import Spool, load_config
-from spool.core import buffer as buffer_mod
-from spool.core.buffer import ACKED, INFLIGHT, PENDING, REJECTED, Buffer
-from spool.core.reading import Reading
-from spool.core.retention import REASON_REJECTED, GapRecord, Policy, Retention
-from spool.core.shipper import Shipper
-from spool.sinks.base import AckSet, Envelope
-from spool.sinks.memory import Accept, MemorySink, Poison
+from spoolpi import SpoolPi, load_config
+from spoolpi.core import buffer as buffer_mod
+from spoolpi.core.buffer import ACKED, INFLIGHT, PENDING, REJECTED, Buffer
+from spoolpi.core.reading import Reading
+from spoolpi.core.retention import REASON_REJECTED, GapRecord, Policy, Retention
+from spoolpi.core.shipper import Shipper
+from spoolpi.sinks.base import AckSet, Envelope
+from spoolpi.sinks.memory import Accept, MemorySink, Poison
 from tests.shipping import FAST_BACKOFF, assert_invariants, drain, fill, gap_envelopes, reading
 
 
@@ -106,18 +106,18 @@ def test_quarantined_gaps_do_not_count_as_unshipped(tmp_path: Path) -> None:
 # --- poison input ------------------------------------------------------------------
 
 
-def test_spool_refuses_text_it_could_never_store(tmp_path: Path) -> None:
-    cfg = tmp_path / "spool.toml"
+def test_spoolpi_refuses_text_it_could_never_store(tmp_path: Path) -> None:
+    cfg = tmp_path / "spoolpi.toml"
     cfg.write_text(
         '[buffer]\npath = "b.db"\n[retention]\npolicy = "drop_oldest"\nmax_rows = 100\n'
         '[sink]\ntype = "jsonl"\npath = "out.jsonl"\n'
     )
     sink = MemorySink()
-    with Spool(load_config(cfg), sink) as spool:
+    with SpoolPi(load_config(cfg), sink) as spoolpi:
         with pytest.raises(ValueError, match="not valid UTF-8"):
-            spool.write("\ud800", 1.0)
-        spool.write("t1", 2.0)  # the batch wasn't poisoned by the refused write
-        assert spool.drain(5)
+            spoolpi.write("\ud800", 1.0)
+        spoolpi.write("t1", 2.0)  # the batch wasn't poisoned by the refused write
+        assert spoolpi.drain(5)
     assert [e.payload.sensor_id for e in sink.received if isinstance(e.payload, Reading)] == ["t1"]
 
 

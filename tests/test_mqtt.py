@@ -18,12 +18,12 @@ from paho.mqtt.packettypes import PacketTypes
 from paho.mqtt.properties import Properties
 from paho.mqtt.reasoncodes import ReasonCode
 
-from spool.core.buffer import REJECTED, BatchWriter, Buffer
-from spool.core.reading import Reading
-from spool.core.retention import REASON_REJECTED, GapRecord
-from spool.core.shipper import Shipper
-from spool.sinks.base import AckSet, Envelope, SinkError
-from spool.sinks.mqtt import MqttSink, topic_part
+from spoolpi.core.buffer import REJECTED, BatchWriter, Buffer
+from spoolpi.core.reading import Reading
+from spoolpi.core.retention import REASON_REJECTED, GapRecord
+from spoolpi.core.shipper import Shipper
+from spoolpi.sinks.base import AckSet, Envelope, SinkError
+from spoolpi.sinks.mqtt import MqttSink, topic_part
 from tests.harness.broker import Broker, find_mosquitto
 from tests.shipping import FAST_BACKOFF, drain, reading
 
@@ -116,12 +116,12 @@ def test_all_acked_with_escaped_topics_and_json_payload() -> None:
     sink = make_sink(client)
     assert sink.send(batch(1, 2, sensor="rack/3+#")) == AckSet.of([1, 2])
     topic, payload, props = client.published[0]
-    assert topic == "spool/dev%2F1/reading/rack%2F3%2B%23"
+    assert topic == "spoolpi/dev%2F1/reading/rack%2F3%2B%23"
     record = json.loads(payload)
     assert record["device_id"] == "dev/1" and record["seq"] == 1 and record["value"] == 1.0
     assert record["type"] == "reading" and record["buffer_id"] == "buf"
     assert props.ContentType == "application/json" and props.PayloadFormatIndicator == 1
-    assert client.kw["client_id"] == "spool-dev/1" and client.kw["protocol"] == mqtt.MQTTv5
+    assert client.kw["client_id"] == "spoolpi-dev/1" and client.kw["protocol"] == mqtt.MQTTv5
     assert client.connect_kwargs == {"clean_start": True}
 
 
@@ -130,7 +130,7 @@ def test_gap_records_go_to_the_gap_topic() -> None:
     sink = make_sink(client)
     gap = Envelope("buf", 9, GapRecord(None, "boot", 1, 2, "backpressure", 5))
     sink.send([gap])
-    assert client.published[0][0] == "spool/dev%2F1/gap/_all"
+    assert client.published[0][0] == "spoolpi/dev%2F1/gap/_all"
 
 
 def test_reason_codes_map_to_accept_reject_retry() -> None:
@@ -218,7 +218,7 @@ class Subscriber:
             client_id=session or "",
             protocol=mqtt.MQTTv5,
         )
-        self.client.on_connect = lambda c, *_: c.subscribe("spool/#", qos=1)
+        self.client.on_connect = lambda c, *_: c.subscribe("spoolpi/#", qos=1)
         self.client.on_subscribe = lambda *_: ready.set()
         self.client.on_message = self._on_message
         self.client.reconnect_delay_set(min_delay=1, max_delay=2)
@@ -313,14 +313,14 @@ def test_broker_outage_loses_nothing(tmp_path: Path) -> None:
 
 @needs_broker
 def test_cli_check_and_run_over_mqtt(tmp_path: Path, broker: Broker) -> None:
-    cfg = tmp_path / "spool.toml"
+    cfg = tmp_path / "spoolpi.toml"
     cfg.write_text(
         '[buffer]\npath = "b.db"\n[retention]\npolicy = "drop_oldest"\nmax_rows = 1000\n'
         f'[sink]\ntype = "mqtt"\nhost = "127.0.0.1"\nport = {broker.port}\n'
         '[device]\nid = "cli-dev"\n'
     )
     check = subprocess.run(
-        [sys.executable, "-m", "spool", "check", str(cfg)],
+        [sys.executable, "-m", "spoolpi", "check", str(cfg)],
         capture_output=True,
         text=True,
         check=False,
@@ -331,7 +331,7 @@ def test_cli_check_and_run_over_mqtt(tmp_path: Path, broker: Broker) -> None:
     sub = Subscriber(broker.port)
     lines = "".join(json.dumps({"sensor_id": "t", "value": i}) + "\n" for i in range(20))
     run = subprocess.run(
-        [sys.executable, "-m", "spool", "run", str(cfg)],
+        [sys.executable, "-m", "spoolpi", "run", str(cfg)],
         input=lines,
         capture_output=True,
         text=True,
@@ -346,7 +346,7 @@ def test_cli_check_and_run_over_mqtt(tmp_path: Path, broker: Broker) -> None:
 
 @needs_broker
 def test_acl_denied_topic_is_rejected_and_reported_as_a_gap(tmp_path: Path) -> None:
-    acl = "topic readwrite spool/#\ntopic deny spool/+/reading/secret\n"
+    acl = "topic readwrite spoolpi/#\ntopic deny spoolpi/+/reading/secret\n"
     with Broker(tmp_path, acl=acl) as broker:
         sub = Subscriber(broker.port)
         db = tmp_path / "b.db"

@@ -1,29 +1,29 @@
-# Using Spool as a library
+# Using SpoolPi as a library
 
-You keep your sampling loop: the hardware-specific part stays yours. Spool gives you `write()`.
+You keep your sampling loop: the hardware-specific part stays yours. SpoolPi gives you `write()`.
 
 ```python
-from spool import BufferFull, Spool
+from spoolpi import BufferFull, SpoolPi
 
-with Spool.from_config("/etc/spool/spool.toml") as spool:
+with SpoolPi.from_config("/etc/spoolpi/spoolpi.toml") as spoolpi:
     while running:
         for sensor in sensors:
             try:
-                spool.write(sensor.id, sensor.read(), sensor.unit)
+                spoolpi.write(sensor.id, sensor.read(), sensor.unit)
             except BufferFull:
                 pass  # halt_and_alarm only: already counted in a gap record and logged
-        spool.tick()
+        spoolpi.tick()
         time.sleep(1)
 ```
 
-## `Spool`
+## `SpoolPi`
 
 | | |
 |---|---|
-| `Spool.from_config(path)` | Load a [config file](configuration.md) and start. |
-| `Spool(config, sink=None)` | Start from a loaded config (`spool.load_config(path)`). Passing `sink` replaces the configured sink with any object implementing the sink protocol. |
+| `SpoolPi.from_config(path)` | Load a [config file](configuration.md) and start. |
+| `SpoolPi(config, sink=None)` | Start from a loaded config (`spoolpi.load_config(path)`). Passing `sink` replaces the configured sink with any object implementing the sink protocol. |
 | `write(sensor_id, value, unit=None)` | Record one sample, stamped now. `value=None` records a failed read, which still ships. |
-| `write_reading(reading)` | Record a fully built `spool.Reading` (your own timestamps, QC flags). |
+| `write_reading(reading)` | Record a fully built `spoolpi.Reading` (your own timestamps, QC flags). |
 | `tick()` | Commit the pending batch if it's older than `batch.max_delay_s`. Call it when idle between writes, so readings don't wait for the next write. |
 | `flush()` | Commit the pending batch now. |
 | `drain(timeout_s)` | Commit, then wait until everything is shipped. Returns `True` if it was. |
@@ -39,29 +39,29 @@ What starting does:
 
 ### Threads
 
-Call `write`, `tick`, `flush`, `drain` and `close` from **the thread that created the Spool**.
+Call `write`, `tick`, `flush`, `drain` and `close` from **the thread that created the SpoolPi**.
 The buffer's SQLite connection belongs to that thread and refuses others. To sample from several
-threads, send the readings through a `queue.Queue` to that one thread. Spool's own threads never
+threads, send the readings through a `queue.Queue` to that one thread. SpoolPi's own threads never
 block `write()`.
 
 ### Errors
 
 | Raised by | Exception | Meaning |
 |---|---|---|
-| `write`, `tick`, `flush` | `spool.BufferFull` | `halt_and_alarm` refused a batch. `.discarded` is how many readings, and they're already counted in a gap record. Don't retry them. `drain` and `close` absorb this instead of raising. |
-| `write`, `write_reading` | `ValueError` | Text Spool can't store, e.g. a sensor id containing a lone UTF-16 surrogate. Refused at once, so it can't poison the batch. |
-| `Spool.from_config`, `load_config` | `spool.ConfigError` | Names the file, line and fix. |
+| `write`, `tick`, `flush` | `spoolpi.BufferFull` | `halt_and_alarm` refused a batch. `.discarded` is how many readings, and they're already counted in a gap record. Don't retry them. `drain` and `close` absorb this instead of raising. |
+| `write`, `write_reading` | `ValueError` | Text SpoolPi can't store, e.g. a sensor id containing a lone UTF-16 surrogate. Refused at once, so it can't poison the batch. |
+| `SpoolPi.from_config`, `load_config` | `spoolpi.ConfigError` | Names the file, line and fix. |
 
 A non-finite value (`nan`, `inf`) is stored as `None`: a failed read.
 
 ## Writing your own sink
 
-A sink is any object with `send` and `close` (`spool.sinks.base.Sink`):
+A sink is any object with `send` and `close` (`spoolpi.sinks.base.Sink`):
 
 ```python
 from collections.abc import Sequence
 
-from spool.sinks.base import AckSet, Envelope, SinkError, to_wire
+from spoolpi.sinks.base import AckSet, Envelope, SinkError, to_wire
 
 
 class MySink:
@@ -79,7 +79,7 @@ class MySink:
         ...
 
 
-spool = Spool(load_config("spool.toml"), sink=MySink())
+spoolpi = SpoolPi(load_config("spoolpi.toml"), sink=MySink())
 ```
 
 The contract:
@@ -99,7 +99,7 @@ The contract:
 
 ## Stability
 
-v0.1 supports the names exported from `spool` (`Spool`, `Reading`, `GapRecord`, `BufferFull`,
+v0.1 supports the names exported from `spoolpi` (`SpoolPi`, `Reading`, `GapRecord`, `BufferFull`,
 `ConfigError`, `Policy`, `Retention`, `load_config`) plus the sink protocol in
-`spool.sinks.base`. Everything under `spool.core` works, and is how Spool is built and tested,
+`spoolpi.sinks.base`. Everything under `spoolpi.core` works, and is how SpoolPi is built and tested,
 but may change before 1.0.

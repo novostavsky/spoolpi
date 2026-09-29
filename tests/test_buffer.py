@@ -9,9 +9,9 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from spool.core import buffer as buffer_mod
-from spool.core.buffer import ACKED, INFLIGHT, PENDING, REJECTED, BatchWriter, Buffer
-from spool.core.reading import TS_CORRECTED, Reading
+from spoolpi.core import buffer as buffer_mod
+from spoolpi.core.buffer import ACKED, INFLIGHT, PENDING, REJECTED, BatchWriter, Buffer
+from spoolpi.core.reading import TS_CORRECTED, Reading
 
 INT64 = st.integers(-(2**63), 2**63 - 1)
 TEXT = st.text(alphabet=st.characters(blacklist_categories=("Cs",)))

@@ -10,9 +10,9 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from spool.core.buffer import INFLIGHT, PENDING, BatchWriter, Buffer
-from spool.core.reading import Reading
-from spool.core.retention import (
+from spoolpi.core.buffer import INFLIGHT, PENDING, BatchWriter, Buffer
+from spoolpi.core.reading import Reading
+from spoolpi.core.retention import (
     REASON_BACKPRESSURE,
     REASON_DROP_OLDEST,
     BufferFull,
@@ -21,8 +21,8 @@ from spool.core.retention import (
     Retention,
     summarize,
 )
-from spool.core.shipper import Shipper
-from spool.sinks.memory import MemorySink, Raise
+from spoolpi.core.shipper import Shipper
+from spoolpi.sinks.memory import MemorySink, Raise
 from tests.harness.crash import crash_seed, run_until_killed
 from tests.shipping import FAST_BACKOFF, assert_invariants, drain, gap_envelopes
 

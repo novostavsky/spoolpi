@@ -13,10 +13,10 @@ from pathlib import Path
 
 import pytest
 
-from spool.core.buffer import BatchWriter, Buffer
-from spool.core.reading import Reading
-from spool.core.shipper import Backoff, Shipper
-from spool.sinks.memory import Accept, Behavior, Hang, MemorySink, Partial, Poison, Raise, Reject
+from spoolpi.core.buffer import BatchWriter, Buffer
+from spoolpi.core.reading import Reading
+from spoolpi.core.shipper import Backoff, Shipper
+from spoolpi.sinks.memory import Accept, Behavior, Hang, MemorySink, Partial, Poison, Raise, Reject
 from tests.shipping import FAST_BACKOFF, assert_invariants, drain, fill, reading
 
 

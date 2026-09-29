@@ -14,9 +14,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from spool.core.buffer import Buffer
-from spool.core.shipper import Backoff, Shipper
-from spool.sinks.memory import Accept, Behavior, MemorySink, Raise
+from spoolpi.core.buffer import Buffer
+from spoolpi.core.shipper import Backoff, Shipper
+from spoolpi.sinks.memory import Accept, Behavior, MemorySink, Raise
 from tests.shipping import drain, reading
 
 REGIMES = {

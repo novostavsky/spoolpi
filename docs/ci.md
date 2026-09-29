@@ -1,6 +1,6 @@
 # CI
 
-All of Spool's CI is one script, `ci/run.sh`. Today it runs locally, in the Debian WSL2
+All of SpoolPi's CI is one script, `ci/run.sh`. Today it runs locally, in the Debian WSL2
 distro that holds the repo. When the project moves to GitHub, each workflow job will call
 one stage of the same script (see the end of this page), so nothing gets rewritten.
 
@@ -9,9 +9,9 @@ one stage of the same script (see the end of this page), so nothing gets rewritt
 ```sh
 ci/run.sh              # = all: lint, tests on 3.11/3.12/3.13, package, crash suites (~12 min)
 ci/run.sh quick        # lint + tests on 3.13 (~1.5 min)
-ci/run.sh lint         # ruff format --check, ruff check, mypy --strict on src/spool
+ci/run.sh lint         # ruff format --check, ruff check, mypy --strict on src/spoolpi
 ci/run.sh test 3.11    # the fast suite on one Python version
-ci/run.sh package      # build; twine check --strict; wheel contents; clean venv -> "only spool installed" -> spool check / run
+ci/run.sh package      # build; twine check --strict; wheel contents; clean venv -> "only spoolpi installed" -> spoolpi check / run
 ci/run.sh crash        # SIGKILL suites: 1,000 (buffer) / 100 (seq) / 300 (retention) cycles
 ci/run.sh nightly      # crash suites at 10,000 cycles (~60 min)
 ci/run.sh last         # summary of the most recent run
@@ -23,7 +23,7 @@ ci/run.sh last         # summary of the most recent run
   default rule set changes between versions.
 - **Python versions.** Each version gets its own venv under `.ci/venvs/`. uv downloads the
   interpreters itself; no root needed.
-- **No silent skips.** Stages set `SPOOL_REQUIRE_INTEGRATION=1`. With it, a test that would
+- **No silent skips.** Stages set `SPOOLPI_REQUIRE_INTEGRATION=1`. With it, a test that would
   skip because mosquitto, PostgreSQL, openssl, unprivileged time namespaces or an optional
   package is missing *fails* instead (`tests/conftest.py`). A plain `pytest` on a machine
   without those tools still skips them.
@@ -32,10 +32,10 @@ ci/run.sh last         # summary of the most recent run
 - **Replaying a crash failure.** The summary records each crash suite's seed. Replay one with:
 
   ```sh
-  SPOOL_CRASH_SEED=<seed> ci/run.sh crash
+  SPOOLPI_CRASH_SEED=<seed> ci/run.sh crash
   ```
 
-  `SPOOL_CRASH_CYCLES` changes the buffer suite's cycle count.
+  `SPOOLPI_CRASH_CYCLES` changes the buffer suite's cycle count.
 
 ## What runs when
 

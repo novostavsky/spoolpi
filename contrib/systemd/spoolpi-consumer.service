@@ -1,0 +1,20 @@
+[Unit]
+Description=SpoolPi reference consumer (MQTT -> Postgres)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+# Needs `spoolpi[consumer]`. The DSN comes from the environment, so any password
+# stays off the command line and out of `ps`. The file holds one line:
+#   SPOOLPI_CONSUMER_DSN=postgresql://user:password@db/telemetry
+EnvironmentFile=/etc/spoolpi/consumer.env
+# Keep --client-id stable: the broker holds messages for this session while
+# the consumer is down.
+ExecStart=/opt/spoolpi/.venv/bin/python -m spoolpi.consumer --broker broker.example.org:1883 --client-id spoolpi-consumer --init-schema
+Restart=always
+RestartSec=5
+DynamicUser=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Spool's CI, in one script. Locally it's run by hand, by git hooks and by a nightly
+# SpoolPi's CI, in one script. Locally it's run by hand, by git hooks and by a nightly
 # systemd timer; on GitHub each workflow job will call one stage of it.
 #
 #   ci/run.sh [all]            lint, tests on 3.11/3.12/3.13, package, crash suites (~12 min)
@@ -7,8 +7,8 @@
 #   ci/run.sh lint             ruff format --check, ruff check, mypy (the pre-commit hook)
 #   ci/run.sh test [VERSION]   fast suite on one Python (default 3.13)
 #   ci/run.sh package          build the wheel; install into a clean venv; zero-deps check
-#   ci/run.sh crash            slow SIGKILL suites (SPOOL_CRASH_CYCLES, SPOOL_CRASH_SEED)
-#   ci/run.sh nightly          crash suites at SPOOL_CRASH_CYCLES=10000 (~60 min)
+#   ci/run.sh crash            slow SIGKILL suites (SPOOLPI_CRASH_CYCLES, SPOOLPI_CRASH_SEED)
+#   ci/run.sh nightly          crash suites at SPOOLPI_CRASH_CYCLES=10000 (~60 min)
 #   ci/run.sh last             show the most recent run's summary
 #   ci/run.sh install-nightly  install and start the systemd user timer (03:00 daily)
 set -euo pipefail
@@ -38,12 +38,12 @@ fi
 if [[ "$stage" == install-nightly ]]; then
   units="$HOME/.config/systemd/user"
   mkdir -p "$units"
-  for f in spool-ci-nightly.service spool-ci-nightly.timer; do
+  for f in spoolpi-ci-nightly.service spoolpi-ci-nightly.timer; do
     sed "s|@REPO@|$REPO|g" "$REPO/contrib/ci/$f" > "$units/$f"
   done
   systemctl --user daemon-reload
-  systemctl --user enable --now spool-ci-nightly.timer
-  systemctl --user list-timers spool-ci-nightly.timer --no-pager
+  systemctl --user enable --now spoolpi-ci-nightly.timer
+  systemctl --user list-timers spoolpi-ci-nightly.timer --no-pager
   exit 0
 fi
 
@@ -51,7 +51,7 @@ RUN="$CI/logs/$(date +%Y%m%d-%H%M%S)-$stage"
 mkdir -p "$RUN"
 ln -sfn "$RUN" "$CI/logs/last"
 SUMMARY="$RUN/summary.txt"
-echo "spool CI: $stage  ($(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo '?')$(git -C "$REPO" diff --quiet 2>/dev/null || echo ', uncommitted changes'))" | tee "$SUMMARY"
+echo "spoolpi CI: $stage  ($(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo '?')$(git -C "$REPO" diff --quiet 2>/dev/null || echo ', uncommitted changes'))" | tee "$SUMMARY"
 
 # step NAME CMD...: run CMD with output to $RUN/NAME.log; one line per step on screen.
 step() {
@@ -69,7 +69,7 @@ step() {
     exit 1
   fi
   # Crash suites print their seeds; keep them in the summary so failures can be replayed
-  # (SPOOL_CRASH_SEED=<seed> ci/run.sh crash).
+  # (SPOOLPI_CRASH_SEED=<seed> ci/run.sh crash).
   # pytest's progress dots can share the line, so match anywhere and strip them.
   grep -hoE 'crash-seed [a-z]+=[0-9]+|seed=[0-9]+ cycles=.*|distinct seqs=.*' "$log" 2>/dev/null \
     | sed 's/^/      /' | tee -a "$SUMMARY" || true
@@ -94,13 +94,13 @@ do_lint() {
   venv_for "$MAIN_PY"
   step ruff-format "$VENV/bin/ruff" format --check src tests bench
   step ruff-check "$VENV/bin/ruff" check src tests bench
-  step mypy "$VENV/bin/mypy" src/spool
+  step mypy "$VENV/bin/mypy" src/spoolpi
 }
 
 do_test() {
   local py="${1:-$MAIN_PY}"
   venv_for "$py"
-  step "tests-py$py" env SPOOL_REQUIRE_INTEGRATION=1 \
+  step "tests-py$py" env SPOOLPI_REQUIRE_INTEGRATION=1 \
     "$VENV/bin/python" -m pytest -q -p no:logging -p no:cacheprovider -rfE
 }
 
@@ -115,7 +115,7 @@ package_check() {
   # The wheel holds the package, its type marker and data files, and nothing else.
   local files
   files="$("$VENV/bin/python" -m zipfile -l "$dist"/*.whl)" || return 1
-  for needed in spool/py.typed spool/consumer/schema.sql spool/cli.py; do
+  for needed in spoolpi/py.typed spoolpi/consumer/schema.sql spoolpi/cli.py; do
     grep -q "$needed" <<<"$files" || { echo "wheel is missing $needed"; return 1; }
   done
   if grep -qE '\.gitkeep|/tests?/|\.pyc|__pycache__' <<<"$files"; then
@@ -125,18 +125,18 @@ package_check() {
   fi
   uv venv --quiet --python "$MAIN_PY" "$clean" || return 1
   uv pip install --quiet --python "$clean/bin/python" "$dist"/*.whl || return 1
-  # Zero runtime dependencies: the clean venv must hold spool and nothing else.
+  # Zero runtime dependencies: the clean venv must hold spoolpi and nothing else.
   installed="$(uv pip list --python "$clean/bin/python" --format freeze | cut -d= -f1)" || return 1
-  if [[ "$installed" != "spool" ]]; then
-    echo "expected only spool in a clean install, found:"
+  if [[ "$installed" != "spoolpi" ]]; then
+    echo "expected only spoolpi in a clean install, found:"
     echo "$installed"
     return 1
   fi
-  "$clean/bin/spool" --help >/dev/null || return 1
+  "$clean/bin/spoolpi" --help >/dev/null || return 1
   tmp="$(mktemp -d)" || return 1
-  printf '[buffer]\npath = "b.db"\n[retention]\npolicy = "drop_oldest"\nmax_rows = 1000\n[sink]\ntype = "jsonl"\npath = "out.jsonl"\n' >"$tmp/spool.toml" || return 1
-  "$clean/bin/spool" check "$tmp/spool.toml" || return 1
-  echo '{"sensor_id": "t1", "value": 1.5}' | "$clean/bin/spool" run "$tmp/spool.toml" || return 1
+  printf '[buffer]\npath = "b.db"\n[retention]\npolicy = "drop_oldest"\nmax_rows = 1000\n[sink]\ntype = "jsonl"\npath = "out.jsonl"\n' >"$tmp/spoolpi.toml" || return 1
+  "$clean/bin/spoolpi" check "$tmp/spoolpi.toml" || return 1
+  echo '{"sensor_id": "t1", "value": 1.5}' | "$clean/bin/spoolpi" run "$tmp/spoolpi.toml" || return 1
   grep -q '"sensor_id":"t1"' "$tmp/out.jsonl" || { echo "reading didn't reach the jsonl sink"; return 1; }
   rm -rf "$tmp"
 }
@@ -148,7 +148,7 @@ do_package() {
 
 do_crash() {
   venv_for "$MAIN_PY"
-  step crash-suites env SPOOL_REQUIRE_INTEGRATION=1 \
+  step crash-suites env SPOOLPI_REQUIRE_INTEGRATION=1 \
     "$VENV/bin/python" -m pytest -q -s -p no:logging -p no:cacheprovider -m slow -rfE
 }
 
@@ -158,8 +158,8 @@ case "$stage" in
   package) do_package ;;
   crash) do_crash ;;
   nightly)
-    export SPOOL_CRASH_CYCLES="${SPOOL_CRASH_CYCLES:-10000}"
-    echo "  (SPOOL_CRASH_CYCLES=$SPOOL_CRASH_CYCLES)" | tee -a "$SUMMARY"
+    export SPOOLPI_CRASH_CYCLES="${SPOOLPI_CRASH_CYCLES:-10000}"
+    echo "  (SPOOLPI_CRASH_CYCLES=$SPOOLPI_CRASH_CYCLES)" | tee -a "$SUMMARY"
     do_crash
     ;;
   quick)

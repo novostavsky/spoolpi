@@ -1,7 +1,0 @@
-[Unit]
-Description=Spool nightly CI: crash suites at 10,000 SIGKILL cycles
-
-[Service]
-Type=oneshot
-ExecStart=/bin/bash @REPO@/ci/run.sh nightly
-Nice=10

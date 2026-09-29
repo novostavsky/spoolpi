@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from spool.config import ConfigError, load
-from spool.core.retention import Policy
+from spoolpi.config import ConfigError, load
+from spoolpi.core.retention import Policy
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -24,7 +24,7 @@ path = "out/data.jsonl"
 
 
 def write(tmp_path: Path, text: str) -> Path:
-    p = tmp_path / "spool.toml"
+    p = tmp_path / "spoolpi.toml"
     p.write_text(text)
     return p
 
@@ -50,7 +50,7 @@ def test_minimal_config_loads_with_defaults(tmp_path: Path) -> None:
 
 
 def test_example_config_is_valid() -> None:
-    load(ROOT / "examples" / "spool.toml")
+    load(ROOT / "examples" / "spoolpi.toml")
 
 
 # --- acceptance: no default policy; errors name file, line and fix ---------------
@@ -60,7 +60,7 @@ def test_missing_policy_is_refused_with_file_line_and_fix(tmp_path: Path) -> Non
     text = VALID.replace('policy = "drop_oldest"\n', "")
     e = error_for(tmp_path, text)
     assert e.line == line_of(text, "[retention]")
-    assert str(e).startswith(f"{tmp_path / 'spool.toml'}:{e.line}: ")
+    assert str(e).startswith(f"{tmp_path / 'spoolpi.toml'}:{e.line}: ")
     assert "no default" in e.problem
     assert 'policy = "drop_oldest"' in e.fix and "halt_and_alarm" in e.fix
 
@@ -159,7 +159,7 @@ def test_mqtt_config_loads_with_defaults(tmp_path: Path) -> None:
     m = cfg.sink.mqtt
     assert m is not None and cfg.sink.path is None
     assert (m.host, m.port, m.protocol, m.tls) == ("broker", 1883, "5", True)
-    assert m.topic == "spool/{device_id}/{type}/{sensor_id}"
+    assert m.topic == "spoolpi/{device_id}/{type}/{sensor_id}"
     assert m.password_file == tmp_path / "pw"
     assert cfg.device_id == "greenhouse-1"
 

@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from spool.core.reading import Reading
-from spool.core.retention import GapRecord
-from spool.sinks.base import AckSet, Envelope, Sink, SinkError, to_wire
-from spool.sinks.jsonl import JsonlSink
-from spool.sinks.memory import Hang, MemorySink, Partial, Raise, Reject
+from spoolpi.core.reading import Reading
+from spoolpi.core.retention import GapRecord
+from spoolpi.sinks.base import AckSet, Envelope, Sink, SinkError, to_wire
+from spoolpi.sinks.jsonl import JsonlSink
+from spoolpi.sinks.memory import Hang, MemorySink, Partial, Raise, Reject
 
 
 def batch(*seqs: int) -> list[Envelope]:

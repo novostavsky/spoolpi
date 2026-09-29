@@ -1,0 +1,19 @@
+
+[buffer]
+path = "buffer.db"
+[retention]
+policy = "drop_oldest"
+max_rows = 10000000
+[batch]
+max_rows = 15        # the naive spike commits every 15 rows too
+max_delay_s = 1.0
+[shipper]
+batch_size = 100
+send_timeout_s = 5
+poll_interval_s = 0.05
+backoff_initial_s = 0.05
+backoff_max_s = 1
+[sink]
+type = "http"
+url = "http://127.0.0.1:42105/ingest"
+timeout_s = 2

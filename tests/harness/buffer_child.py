@@ -20,10 +20,10 @@ import sys
 import threading
 import time
 
-from spool.core.buffer import BatchWriter, Buffer
-from spool.core.clock import BOOT_ID, mono_ns, wall_ns
-from spool.core.reading import Reading
-from spool.core.retention import Policy, Retention
+from spoolpi.core.buffer import BatchWriter, Buffer
+from spoolpi.core.clock import BOOT_ID, mono_ns, wall_ns
+from spoolpi.core.reading import Reading
+from spoolpi.core.retention import Policy, Retention
 
 
 def report(tag: str, step: int) -> None:

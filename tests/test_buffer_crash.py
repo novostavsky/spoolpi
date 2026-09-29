@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from spool.core.buffer import INFLIGHT
+from spoolpi.core.buffer import INFLIGHT
 from tests.harness.crash import crash_seed, run_until_killed
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -105,8 +105,8 @@ def test_crash_cycles_smoke(tmp_path: Path) -> None:
 @pytest.mark.slow
 def test_acceptance_1000_crash_cycles(tmp_path: Path) -> None:
     seed = crash_seed()
-    print(f"crash-seed buffer={seed}")  # replay with SPOOL_CRASH_SEED
-    # 1,000 by default; the nightly run sets SPOOL_CRASH_CYCLES=10000.
-    tally = _run(tmp_path, cycles=int(os.environ.get("SPOOL_CRASH_CYCLES", "1000")), seed=seed)
+    print(f"crash-seed buffer={seed}")  # replay with SPOOLPI_CRASH_SEED
+    # 1,000 by default; the nightly run sets SPOOLPI_CRASH_CYCLES=10000.
+    tally = _run(tmp_path, cycles=int(os.environ.get("SPOOLPI_CRASH_CYCLES", "1000")), seed=seed)
     print(_summary(tally, seed))
     assert tally.killed_with_inflight > 0, "kills never landed mid-flight; test is too weak"

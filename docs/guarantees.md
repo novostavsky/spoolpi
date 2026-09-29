@@ -1,6 +1,6 @@
 # Guarantees
 
-What Spool promises about each reading, what can go wrong, and how each claim is checked.
+What SpoolPi promises about each reading, what can go wrong, and how each claim is checked.
 "Record" means a reading or a gap record; both carry a `(buffer_id, seq)` key.
 
 ## The life of a reading
@@ -46,7 +46,7 @@ Separately, the kernel writes dirty pages out within about 30 seconds on its own
 that roll back are simply gone. Records that had shipped but whose acknowledgement rolled back
 are sent again under the same key.
 
-**Status:** this follows from SQLite's documented behavior and Spool's reservation scheme. It
+**Status:** this follows from SQLite's documented behavior and SpoolPi's reservation scheme. It
 has **not** been measured with real power cuts on an SD card, which is the most likely way a
 field device loses power. That test is part of the Raspberry Pi hardware pass.
 
@@ -98,7 +98,7 @@ Sync is read from the kernel (`adjtimex`), with `timedatectl` as a fallback. The
 verified against an injected clock offset in a real Linux time namespace, accurate to within
 26 ns. It has not yet been checked against a real NTP step on a Pi.
 
-## What Spool does not promise
+## What SpoolPi does not promise
 
 - **Durability at the sink.** An acknowledgement means the sink said it has the data: a PUBACK
   from the MQTT broker, a 2xx from the HTTP server, an fsync for the jsonl sink. An MQTT broker

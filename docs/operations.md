@@ -1,6 +1,6 @@
 # Operations
 
-Running Spool on a device: installing, sizing, monitoring, and what to do when something goes
+Running SpoolPi on a device: installing, sizing, monitoring, and what to do when something goes
 wrong.
 
 ## Deploying on a Raspberry Pi (or any systemd Linux)
@@ -8,52 +8,52 @@ wrong.
 1. **Install** into a venv; Raspberry Pi OS enforces PEP 668:
 
    ```sh
-   sudo mkdir -p /opt/spool && sudo uv venv /opt/spool/.venv
-   sudo uv pip install --python /opt/spool/.venv/bin/python 'spool[mqtt]'   # from a wheel for now
+   sudo mkdir -p /opt/spoolpi && sudo uv venv /opt/spoolpi/.venv
+   sudo uv pip install --python /opt/spoolpi/.venv/bin/python 'spoolpi[mqtt]'   # from a wheel for now
    ```
 
-2. **Configure** `/etc/spool/spool.toml`, starting from
-   [`examples/spool.toml`](../examples/spool.toml). Put the buffer under `/var/lib/spool/`, and
-   run `/opt/spool/.venv/bin/spool check /etc/spool/spool.toml`.
+2. **Configure** `/etc/spoolpi/spoolpi.toml`, starting from
+   [`examples/spoolpi.toml`](../examples/spoolpi.toml). Put the buffer under `/var/lib/spoolpi/`, and
+   run `/opt/spoolpi/.venv/bin/spoolpi check /etc/spoolpi/spoolpi.toml`.
 
-3. **Run it as a service** with [`contrib/systemd/spool.service`](../contrib/systemd/spool.service):
+3. **Run it as a service** with [`contrib/systemd/spoolpi.service`](../contrib/systemd/spoolpi.service):
 
    ```sh
-   sudo cp contrib/systemd/spool.service /etc/systemd/system/
-   sudo systemctl daemon-reload && sudo systemctl enable --now spool
+   sudo cp contrib/systemd/spoolpi.service /etc/systemd/system/
+   sudo systemctl daemon-reload && sudo systemctl enable --now spoolpi
    ```
 
-   The unit pipes a producer (whatever prints your readings as JSON lines) into `spool run`.
-   Replace `/usr/local/bin/read-sensors` with yours. If you use Spool as a library instead,
+   The unit pipes a producer (whatever prints your readings as JSON lines) into `spoolpi run`.
+   Replace `/usr/local/bin/read-sensors` with yours. If you use SpoolPi as a library instead,
    run your own program the same way.
 
    Details that matter:
-   - **No network ordering.** The unit has no `After=network-online.target`, on purpose: Spool
+   - **No network ordering.** The unit has no `After=network-online.target`, on purpose: SpoolPi
      must start and buffer while offline.
-   - **Shutdown.** SIGTERM makes Spool commit what's pending and finish the batch in flight.
+   - **Shutdown.** SIGTERM makes SpoolPi commit what's pending and finish the batch in flight.
      Keep `[shipper] stop_timeout_s` below the unit's `TimeoutStopSec`.
-   - **Service user.** It runs as a throwaway user (`DynamicUser=yes`), and `StateDirectory=spool`
-     gives it a private, writable `/var/lib/spool`.
+   - **Service user.** It runs as a throwaway user (`DynamicUser=yes`), and `StateDirectory=spoolpi`
+     gives it a private, writable `/var/lib/spoolpi`.
    - **Secrets.** A password or token file is passed in with `LoadCredential=`: systemd reads the
      root-only file and gives the service a private copy. Point the config at that copy:
 
      ```ini
-     # in spool.service
-     LoadCredential=mqtt-password:/etc/spool/mqtt-password
+     # in spoolpi.service
+     LoadCredential=mqtt-password:/etc/spoolpi/mqtt-password
      ```
      ```toml
-     # in spool.toml
-     password_file = "/run/credentials/spool.service/mqtt-password"
+     # in spoolpi.toml
+     password_file = "/run/credentials/spoolpi.service/mqtt-password"
      ```
 
-4. **Check it** with `journalctl -u spool` and `spool status /etc/spool/spool.toml`.
+4. **Check it** with `journalctl -u spoolpi` and `spoolpi status /etc/spoolpi/spoolpi.toml`.
 
 ### Clock
 
-Spool doesn't need the clock to be right. It needs to know *whether* it's right. Keep
+SpoolPi doesn't need the clock to be right. It needs to know *whether* it's right. Keep
 `systemd-timesyncd` (or chrony) enabled. Readings taken before the first sync are corrected
-after it (`ts_quality = 1`), as long as the device hasn't rebooted in between. `spool check`
-shows whether the clock is synced, and how Spool knows (`adjtimex`, or the slower `timedatectl`
+after it (`ts_quality = 1`), as long as the device hasn't rebooted in between. `spoolpi check`
+shows whether the clock is synced, and how SpoolPi knows (`adjtimex`, or the slower `timedatectl`
 fallback).
 
 ## Sizing the buffer
@@ -69,12 +69,12 @@ string). On top of the cap, the file holds:
 | 10 sensors × 10 Hz | 8,640,000 | 9,000,000 | ~1.1 GB |
 | 50 sensors × 1/min | 72,000 | 100,000 | ~16 MB |
 
-The file grows to its high-water mark and stays there. Freed space is reused, and Spool never
+The file grows to its high-water mark and stays there. Freed space is reused, and SpoolPi never
 runs `VACUUM`, which on an SD card would rewrite the whole file.
 
 ## Monitoring
 
-`spool status /etc/spool/spool.toml` (add `--json` for scripts) reports:
+`spoolpi status /etc/spoolpi/spoolpi.toml` (add `--json` for scripts) reports:
 
 | Field | Meaning |
 |---|---|
@@ -90,7 +90,7 @@ A steadily growing `pending` means the uplink is slower than your sensors, or do
 
 ### Log messages
 
-Spool logs state changes, not individual readings. On a Pi Zero, per-reading logs would cost
+SpoolPi logs state changes, not individual readings. On a Pi Zero, per-reading logs would cost
 more writes than the data itself. So each message below appears once per event, and repeats are
 suppressed for 60 seconds.
 
@@ -113,7 +113,7 @@ are never sent, don't count toward the cap, and only the newest 10,000 are kept.
 with:
 
 ```sh
-sqlite3 /var/lib/spool/buffer.db \
+sqlite3 /var/lib/spoolpi/buffer.db \
   "SELECT seq, sensor_id, value, wall_ns FROM readings WHERE state = 3 ORDER BY id DESC LIMIT 20"
 ```
 
@@ -123,15 +123,15 @@ accounting.
 
 ## Upgrades
 
-The buffer file has a schema version, and Spool refuses to open a version it doesn't know, with
+The buffer file has a schema version, and SpoolPi refuses to open a version it doesn't know, with
 a message naming the file. v0.1 has no migrations. Before upgrading across a schema change, let
-the old version ship everything (`spool status` shows `pending` at 0), stop it, and remove the
+the old version ship everything (`spoolpi status` shows `pending` at 0), stop it, and remove the
 buffer file.
 
 ## The receiving side
 
 See the README's [Receiving data](../README.md#receiving-data) section for the MQTT and HTTP
 contracts and the reference consumer. To run the consumer as a service, use
-[`contrib/systemd/spool-consumer.service`](../contrib/systemd/spool-consumer.service). Keep its
+[`contrib/systemd/spoolpi-consumer.service`](../contrib/systemd/spoolpi-consumer.service). Keep its
 `--client-id` stable, because the broker holds messages for that session while the consumer is
 down.

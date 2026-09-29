@@ -15,14 +15,14 @@ pytest.importorskip("paho.mqtt")
 
 import psycopg
 
-from spool.consumer.mqtt import MqttConsumer
-from spool.consumer.postgres import Incoming, apply_schema, store
-from spool.core.buffer import Buffer
-from spool.core.reading import TS_CORRECTED, Reading
-from spool.core.retention import GapRecord
-from spool.core.shipper import Shipper
-from spool.sinks.base import Envelope, to_wire
-from spool.sinks.mqtt import MqttSink
+from spoolpi.consumer.mqtt import MqttConsumer
+from spoolpi.consumer.postgres import Incoming, apply_schema, store
+from spoolpi.core.buffer import Buffer
+from spoolpi.core.reading import TS_CORRECTED, Reading
+from spoolpi.core.retention import GapRecord
+from spoolpi.core.shipper import Shipper
+from spoolpi.sinks.base import Envelope, to_wire
+from spoolpi.sinks.mqtt import MqttSink
 from tests.harness.broker import Broker, find_mosquitto
 from tests.harness.postgres import Postgres, find_postgres
 from tests.shipping import FAST_BACKOFF, drain, reading
@@ -54,7 +54,7 @@ def dsn(server: Postgres) -> Iterator[str]:
 def message(n: int, **overrides: Any) -> Incoming:
     reading_ = Reading("t1", float(n), "C", n, WALL + n, "boot", ts_quality=TS_CORRECTED)
     record = {"device_id": "dev1"} | to_wire(Envelope(BUF, n, reading_)) | overrides
-    return Incoming("spool/dev1/reading/t1", json.dumps(record).encode())
+    return Incoming("spoolpi/dev1/reading/t1", json.dumps(record).encode())
 
 
 def rows(dsn: str, sql: str) -> list[tuple[Any, ...]]:
@@ -81,7 +81,7 @@ def test_store_inserts_once_and_ignores_resends(dsn: str) -> None:
     [(count, year, quality, tests)] = rows(
         dsn,
         "SELECT count(*), max(extract(year FROM ts)), max(ts_quality), max(qc_tests::text) "
-        "FROM spool_readings",
+        "FROM spoolpi_readings",
     )
     assert (count, int(year), quality, tests) == (6, 2026, TS_CORRECTED, "{}")
 
@@ -89,14 +89,14 @@ def test_store_inserts_once_and_ignores_resends(dsn: str) -> None:
 def test_failed_reads_and_gaps_are_stored(dsn: str) -> None:
     gap = GapRecord(None, "boot", 1, 9, "backpressure", 4)
     gap_msg = Incoming(
-        "spool/dev1/gap/_all",
+        "spoolpi/dev1/gap/_all",
         json.dumps({"device_id": "dev1"} | to_wire(Envelope(BUF, 100, gap))).encode(),
     )
     with psycopg.connect(dsn) as conn:
         result = store(conn, [message(1, value=None), gap_msg])
     assert (result.readings, result.gaps) == (1, 1)
-    assert rows(dsn, "SELECT value FROM spool_readings") == [(None,)]
-    assert rows(dsn, "SELECT sensor_id, reason, count FROM spool_gaps") == [
+    assert rows(dsn, "SELECT value FROM spoolpi_readings") == [(None,)]
+    assert rows(dsn, "SELECT sensor_id, reason, count FROM spoolpi_gaps") == [
         (None, "backpressure", 4)
     ]
 
@@ -121,10 +121,12 @@ def test_bad_messages_are_dead_lettered_without_blocking_the_batch(
     dsn: str, payload: bytes, error: str
 ) -> None:
     with psycopg.connect(dsn) as conn:
-        result = store(conn, [message(10), Incoming("spool/x", payload), message(11)])
+        result = store(conn, [message(10), Incoming("spoolpi/x", payload), message(11)])
     assert (result.readings, result.dead_letters) == (2, 1)
-    [(source, stored, reason)] = rows(dsn, "SELECT source, payload, error FROM spool_dead_letters")
-    assert source == "spool/x" and bytes(stored) == payload
+    [(source, stored, reason)] = rows(
+        dsn, "SELECT source, payload, error FROM spoolpi_dead_letters"
+    )
+    assert source == "spoolpi/x" and bytes(stored) == payload
     assert error in reason
 
 
@@ -144,7 +146,7 @@ def wait_for_rows(dsn: str, n: int, timeout_s: float = 60) -> None:
     deadline = time.monotonic() + timeout_s
     while True:
         try:
-            [(count,)] = rows(dsn, "SELECT count(*) FROM spool_readings")
+            [(count,)] = rows(dsn, "SELECT count(*) FROM spoolpi_readings")
             if count >= n:
                 return
         except psycopg.OperationalError:
@@ -164,8 +166,8 @@ def publish_from_device(tmp_path: Path, broker: Broker, n: int) -> Shipper:
 
 
 def assert_exactly_once(dsn: str, n: int) -> None:
-    assert rows(dsn, "SELECT count(*), count(DISTINCT value) FROM spool_readings") == [(n, n)]
-    assert rows(dsn, "SELECT min(value), max(value) FROM spool_readings") == [(0.0, float(n - 1))]
+    assert rows(dsn, "SELECT count(*), count(DISTINCT value) FROM spoolpi_readings") == [(n, n)]
+    assert rows(dsn, "SELECT min(value), max(value) FROM spoolpi_readings") == [(0.0, float(n - 1))]
 
 
 @needs_broker

@@ -14,12 +14,12 @@ import pytest
 
 pytest.importorskip("httpx")
 
-from spool.core.buffer import REJECTED, Buffer
-from spool.core.reading import Reading
-from spool.core.retention import REASON_REJECTED
-from spool.core.shipper import Shipper
-from spool.sinks.base import AckSet, Envelope, SinkError
-from spool.sinks.http import HttpSink
+from spoolpi.core.buffer import REJECTED, Buffer
+from spoolpi.core.reading import Reading
+from spoolpi.core.retention import REASON_REJECTED
+from spoolpi.core.shipper import Shipper
+from spoolpi.sinks.base import AckSet, Envelope, SinkError
+from spoolpi.sinks.http import HttpSink
 from tests.harness.http_server import IngestServer, Reply
 from tests.shipping import FAST_BACKOFF, drain, reading
 
@@ -204,7 +204,7 @@ def test_end_to_end_with_poison_records_and_a_flaky_server(tmp_path: Path) -> No
 def test_cli_run_over_http(tmp_path: Path) -> None:
     (tmp_path / "token").write_text("tok\n")
     with IngestServer() as server:
-        cfg = tmp_path / "spool.toml"
+        cfg = tmp_path / "spoolpi.toml"
         cfg.write_text(
             '[buffer]\npath = "b.db"\n[retention]\npolicy = "drop_oldest"\nmax_rows = 1000\n'
             f'[sink]\ntype = "http"\nurl = "{server.url}"\ntoken_file = "token"\ngzip = true\n'
@@ -212,7 +212,7 @@ def test_cli_run_over_http(tmp_path: Path) -> None:
         )
         lines = "".join(json.dumps({"sensor_id": "t", "value": i}) + "\n" for i in range(25))
         run = subprocess.run(
-            [sys.executable, "-m", "spool", "run", str(cfg)],
+            [sys.executable, "-m", "spoolpi", "run", str(cfg)],
             input=lines,
             capture_output=True,
             text=True,

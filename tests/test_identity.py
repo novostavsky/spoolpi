@@ -8,7 +8,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from spool.core.identity import SeqAllocator, device_id, init_meta, read_buffer_id
+from spoolpi.core.identity import SeqAllocator, device_id, init_meta, read_buffer_id
 
 
 def _open(path: Path) -> sqlite3.Connection:

@@ -1,4 +1,4 @@
-cd ~/spool
+cd ~/spoolpi
 echo "--- build backend actually used"
 uvx -q --from hatchling python -c 'import hatchling.__about__ as a; print("hatchling", a.__version__)'
 echo "--- latest twine"

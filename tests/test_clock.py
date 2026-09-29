@@ -11,8 +11,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from spool.core import clock
-from spool.core.clock import (
+from spoolpi.core import clock
+from spoolpi.core.clock import (
     EXPECTED_TIMEX_SIZE,
     ClockAnchor,
     SystemClock,
@@ -20,7 +20,7 @@ from spool.core.clock import (
     measure_offset_ns,
     timex_plausible,
 )
-from spool.core.reading import TS_CORRECTED, TS_SYNCED, TS_UNSYNCED, Reading
+from spoolpi.core.reading import TS_CORRECTED, TS_SYNCED, TS_UNSYNCED, Reading
 from tests.harness.fakeclock import (
     NS_PER_S,
     FakeClock,
@@ -229,7 +229,7 @@ def test_background_thread_picks_up_sync() -> None:
 _CHILD = textwrap.dedent(
     """
     import json
-    from spool.core.clock import ClockAnchor, SystemClock
+    from spoolpi.core.clock import ClockAnchor, SystemClock
 
     class InjectedSync(SystemClock):
         flag = False

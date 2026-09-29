@@ -1,4 +1,4 @@
-"""With SPOOL_REQUIRE_INTEGRATION=1 (set by ci/run.sh), a test skipped because an
+"""With SPOOLPI_REQUIRE_INTEGRATION=1 (set by ci/run.sh), a test skipped because an
 integration tool or dependency is missing fails instead, so CI can't go green by
 quietly skipping the broker, database, TLS and time-namespace tests. Without the
 variable, those tests skip as usual on machines that lack the tools."""
@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-REQUIRED = os.environ.get("SPOOL_REQUIRE_INTEGRATION") == "1"
+REQUIRED = os.environ.get("SPOOLPI_REQUIRE_INTEGRATION") == "1"
 
 # Substrings of the skip reasons used for missing tools (see tests/harness and the
 # skipif marks), plus pytest.importorskip's "could not import".
@@ -28,7 +28,7 @@ def _missing_tool_reason(report: Any) -> str | None:
 
 def _fail(report: Any, reason: str) -> None:
     report.outcome = "failed"
-    report.longrepr = f"SPOOL_REQUIRE_INTEGRATION=1, but a required tool is missing: {reason}"
+    report.longrepr = f"SPOOLPI_REQUIRE_INTEGRATION=1, but a required tool is missing: {reason}"
 
 
 @pytest.hookimpl(hookwrapper=True)

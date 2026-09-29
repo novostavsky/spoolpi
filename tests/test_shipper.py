@@ -8,13 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from spool.core import shipper as shipper_mod
-from spool.core.buffer import ACKED, INFLIGHT, PENDING, REJECTED, BatchWriter, Buffer
-from spool.core.clock import ClockAnchor
-from spool.core.reading import TS_CORRECTED, Reading
-from spool.core.shipper import Backoff, Shipper
-from spool.sinks.base import AckSet, Envelope
-from spool.sinks.memory import Hang, MemorySink, Partial, Raise, Reject
+from spoolpi.core import shipper as shipper_mod
+from spoolpi.core.buffer import ACKED, INFLIGHT, PENDING, REJECTED, BatchWriter, Buffer
+from spoolpi.core.clock import ClockAnchor
+from spoolpi.core.reading import TS_CORRECTED, Reading
+from spoolpi.core.shipper import Backoff, Shipper
+from spoolpi.sinks.base import AckSet, Envelope
+from spoolpi.sinks.memory import Hang, MemorySink, Partial, Raise, Reject
 from tests.harness.fakeclock import NS_PER_S, FakeClock
 from tests.shipping import FAST_BACKOFF, assert_invariants, drain, fill, reading, steps, wait_for
 
@@ -257,7 +257,7 @@ def test_acked_rows_are_purged_on_cadence(db: Path, running: list[Shipper]) -> N
 
 
 def test_purge_keeps_up_beyond_one_chunk(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("spool.core.shipper._PURGE_CHUNK", 7)
+    monkeypatch.setattr("spoolpi.core.shipper._PURGE_CHUNK", 7)
     fill(db, 50)
     with Buffer(db) as b:
         b.ack(s.id for s in b.claim(50))

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run SpoolPi's nightly CI at 03:00
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+# WSL only runs while Windows is up: a missed night runs at the next start instead.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

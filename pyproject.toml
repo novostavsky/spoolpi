@@ -3,9 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-# "spool" is already taken on PyPI: pick the published name before any upload
-# (open question in spool_implementation-plan.md). The import name stays `spool`.
-name = "spool"
+name = "spoolpi"
 dynamic = ["version"]
 description = "Crash-safe store-and-forward buffering for edge sensor data"
 readme = "README.md"
@@ -47,13 +45,13 @@ dev = [
 ]
 
 [project.scripts]
-spool = "spool.cli:main"
+spoolpi = "spoolpi.cli:main"
 
 [tool.hatch.version]
-path = "src/spool/__init__.py"
+path = "src/spoolpi/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/spool"]
+packages = ["src/spoolpi"]
 exclude = ["**/.gitkeep"]
 
 [tool.hatch.build.targets.sdist]
