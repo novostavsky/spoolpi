@@ -58,4 +58,59 @@ buffer, and the checker then created an empty database file itself. Two fixes:
 - It ran 3 threads (main, shipper, clock anchor) and delivered all 3,000 readings.
 - Memory grew +0.18 MB after warm-up, consistent with SQLite's 2 MB page cache filling. The
   seven-day run will confirm there's no leak.
-- The MQTT sink (which adds paho) isn't measured yet.
+- The MQTT sink (which adds paho) isn't measured on the Pi yet. On x86 it adds 3.5 MB over jsonl
+  (26.6 vs 23.1 MB), so expect ~27.5 MB on the Zero. `bench/pi/rss.py 300 10 1 mqtt` measures
+  it against a local mosquitto (`bash bench/pi/install_test_tools.sh` unpacks one without root).
+
+## Power cuts (`bench/pi/powercut.py`)
+
+The controller runs on the dev machine and drives the Pi over SSH. Each cycle:
+1. It starts a writer on the Pi (`bench/pi/powercut_child.py`) at 10 readings/s, with the
+   default batching. The writer reports every commit.
+2. After a random 5–120 s, it resets the Pi with sysrq `b`: an immediate reboot with no sync
+   and no unmount, so the page cache is lost as in a power cut.
+3. It checks the reboot really happened (by `boot_id`), then compares the last commit the Pi
+   reported with what the buffer actually holds.
+
+It needs this sudo rule on the Pi, narrow on purpose:
+
+```
+pi ALL=(root) NOPASSWD: /usr/bin/tee /proc/sysrq-trigger, /usr/bin/systemctl * systemd-timesyncd, /usr/bin/timedatectl set-ntp *, /usr/bin/date -s *, /usr/sbin/reboot
+```
+
+### `synchronous=NORMAL` (the current default), seed 11
+
+| Cut | Ran | Committed (reported) | Survived | Lost | Integrity |
+|---|---|---|---|---|---|
+| 0 | 57 s | 573 | 331 | 242 | ok |
+| 1 | 69 s | 694 | 342 | 352 | ok |
+| 2 | 111 s | 1,112 | 991 | 121 | ok |
+| 3 | 59 s | 584 | 320 | 264 | ok |
+| 4 | 63 s | 639 | 309 | 330 | ok |
+| 5 | 73 s | 727 | 650 | 77 | ok |
+| 6 | 26 s | 265 | 0 | 265 | ok |
+| 7 | 64 s | 639 | 342 | 297 | ok |
+| 8 | 77 s | 782 | 628 | 154 | ok |
+| 9 | 96 s | 969 | 925 | 44 | ok |
+
+- **Every cut lost committed readings:** 44–352, median 253, mean 215. At 10 readings/s that's
+  the last 4–35 s.
+- **What survives is what the kernel wrote back on its own.** Linux writes dirty pages out once
+  they're ~30 s old (`vm.dirty_expire_centisecs = 3000`). Cuts at 57–69 s kept ~310–340
+  readings, i.e. the first ~32 s. The 26 s cut kept nothing.
+- **The seq reservation works as designed.** Its `FULL` commit at about the 1,000th record fsyncs
+  everything before it. Both cuts that ran past it kept exactly 991 readings.
+- **No corruption.** `PRAGMA integrity_check` passed after every cut, and SQLite discarded the
+  unsynced WAL tail cleanly.
+- The design bound (~1,000 records) held with room to spare. The typical loss is the ~30 s
+  writeback window, not the bound.
+
+**The Pi didn't come back from the 11th reset.** It fell off the network (no ping, no ARP entry)
+and needed a manual power cycle. The cause is still unknown, and it may be specific to sysrq
+resets. Either way, it ended the run after 10 cuts.
+
+The `FULL` comparison run hasn't happened yet. Following the latency measurements above, `FULL`
+should lose at most the uncommitted batch (~1 s).
+
+Still to do: real plug pulls. A sysrq reset keeps the SD card powered, so the card's own write
+cache survives; a plug pull doesn't.

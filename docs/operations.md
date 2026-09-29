@@ -48,11 +48,27 @@ wrong.
 
 4. **Check it** with `journalctl -u spoolpi` and `spoolpi status /etc/spoolpi/spoolpi.toml`.
 
+5. **Run `sync`** after installing, upgrading or editing the config. A power cut loses whatever
+   the kernel hasn't written back yet, usually the last ~30 s of writes, and that includes your
+   installation. On the test Pi, a reset a few seconds after `uv sync` left an empty package
+   `METADATA` file and a broken venv.
+
+### Power cuts
+
+A power cut loses the readings committed in roughly the last 30 seconds (measured on a Pi Zero 2 W:
+4–35 s, [`guarantees.md`](guarantees.md#power-cuts)). The buffer itself stays intact. If your
+device loses power often, size your expectations to that. Where possible, give it a clean
+shutdown path (a UPS HAT, or a supercapacitor with a shutdown signal), because
+`systemctl stop` loses nothing.
+
 ### Clock
 
 SpoolPi doesn't need the clock to be right. It needs to know *whether* it's right. Keep
 `systemd-timesyncd` (or chrony) enabled. Readings taken before the first sync are corrected
-after it (`ts_quality = 1`), as long as the device hasn't rebooted in between. `spoolpi check`
+after it (`ts_quality = 1`), provided they're still buffered when the clock syncs and the
+device hasn't rebooted in between. If the uplink is up before NTP syncs, pre-sync readings ship
+at once as `ts_quality = 0`. A Pi without an RTC does this on every boot. The receiver can
+correct them from `mono_ns` and `boot_id` ([`guarantees.md`](guarantees.md#time)). `spoolpi check`
 shows whether the clock is synced, and how SpoolPi knows (`adjtimex`, or the slower `timedatectl`
 fallback).
 
