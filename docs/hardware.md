@@ -330,6 +330,33 @@ power-on, in which a power cut can erase the network configuration.**
 Real plug pulls are covered in [their own section](#real-plug-pulls-durability--power-5-pulls-2026-09-29)
 above.
 
+## Seven-day run (`bench/pi/soak/`)
+
+The last v0.1 check: SpoolPi deployed as `docs/operations.md` describes, running for a week
+with deliberate outages. It runs on the 32-bit OS, where the send-thread leak was fatal.
+
+**What runs:**
+
+| Part | How |
+|---|---|
+| SpoolPi | the shipped `contrib/systemd/spoolpi.service`, unchanged, as a system service; `/opt/spoolpi/.venv`, `/etc/spoolpi/spoolpi.toml`, default `durability = "power"` |
+| Producer | `/usr/local/bin/read-sensors` (the unit's producer path): 10 sensors × 1 Hz. Values encode *run × 10⁹ + step*, so every service start's readings can be checked for completeness |
+| Broker | the Debian `mosquitto` package, on localhost. Queue limits off and autosave every 10 s, so the broker itself never drops data |
+| Receiver | `spoolpi-soak-receiver.service`: the reference consumer's MQTT logic (persistent session, acks after commit) storing into SQLite under `UNIQUE (buffer_id, seq)` |
+| Outages | `spoolpi-soak-outage.timer`: the broker stopped for 10–60 min, about 4 times a day |
+| Metrics | `spoolpi-soak-metrics.timer`, every 5 min, to `~/soak/metrics.jsonl`: SpoolPi's RSS, VmSize and threads; restarts; buffer backlog; file sizes; SD-card writes |
+
+Start it with `sudo bash ~/spoolpi/bench/pi/soak/install.sh`. The install waits for the receiver
+to subscribe before starting SpoolPi, because a broker drops messages nobody is subscribed to
+(found in the dry run). Check it any time with `python3 ~/spoolpi/bench/pi/soak/check.py`. Stop
+it with `sudo bash ~/spoolpi/bench/pi/soak/uninstall.sh`; the data stays in `~/soak`.
+
+**Pass criteria:**
+- **Delivery:** every reading is received or counted in a gap, with no holes in any run.
+- **Memory:** RSS stays < 30 MB with no upward trend, and VmSize is flat.
+- **Stability:** no unexplained restarts.
+- **Disk:** the buffer file levels off.
+
 ## 32-bit Raspberry Pi OS (2026-09-29)
 
 The same Zero 2 W and card, reflashed with Raspberry Pi OS Lite **32-bit**, i.e. trixie:

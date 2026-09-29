@@ -1,0 +1,6 @@
+[Unit]
+Description=SpoolPi soak: one metrics sample
+
+[Service]
+Type=oneshot
+ExecStart=/opt/spoolpi/.venv/bin/python /opt/spoolpi-soak/bin/metrics.py /home/pi/soak

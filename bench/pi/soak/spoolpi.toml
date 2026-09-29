@@ -1,0 +1,16 @@
+# Seven-day soak config, installed as /etc/spoolpi/spoolpi.toml. Defaults everywhere
+# except what the soak needs: MQTT to the local broker, and a cap that holds a
+# 60-minute outage (36,000 readings) many times over.
+
+[buffer]
+path = "/var/lib/spoolpi/buffer.db"   # the shipped unit's StateDirectory
+durability = "power"
+
+[retention]
+policy = "drop_oldest"
+max_rows = 1000000   # ~28 h at 10 readings/s, ~120 MB
+
+[sink]
+type = "mqtt"
+host = "127.0.0.1"
+port = 1883

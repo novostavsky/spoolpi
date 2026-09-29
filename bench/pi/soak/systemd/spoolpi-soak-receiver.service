@@ -1,0 +1,12 @@
+[Unit]
+Description=SpoolPi soak: MQTT receiver storing into SQLite
+After=mosquitto.service
+
+[Service]
+User=pi
+ExecStart=/opt/spoolpi/.venv/bin/python /opt/spoolpi-soak/bin/receiver.py /home/pi/soak/receiver.db
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

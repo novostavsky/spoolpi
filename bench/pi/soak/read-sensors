@@ -1,0 +1,55 @@
+#!/usr/bin/python3
+"""Seven-day soak producer: 10 sensors x 1 Hz of verifiable readings on stdout.
+
+Installed as /usr/local/bin/read-sensors, the producer the shipped systemd unit
+pipes into `spoolpi run`. Each start is a new "run" (a counter persisted in the
+service's state directory), and every reading's value is run * 1e9 + step, with
+step counting from 0. The receiver can then prove, per run, that steps are
+gap-free. Progress goes to producer.log in the state directory.
+"""
+
+import json
+import os
+import signal
+import sys
+import time
+from pathlib import Path
+
+# systemd stops the unit with SIGTERM; exit through `finally` so the log gets its "end" line.
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+
+SENSORS = 10
+RATE_HZ = 1.0  # per sensor
+RUN_SPAN = 1_000_000_000
+
+state = Path(os.environ.get("STATE_DIRECTORY", "/var/lib/spoolpi"))
+counter = state / "producer-run"
+run = int(counter.read_text()) + 1 if counter.exists() else 0
+tmp = counter.with_suffix(".tmp")
+tmp.write_text(str(run))
+with open(tmp) as f:
+    os.fsync(f.fileno())
+os.replace(tmp, counter)  # a reused run number would mix two runs' steps
+
+log = open(state / "producer.log", "a", buffering=1)  # noqa: SIM115
+log.write(f"{time.time():.0f} run {run} start\n")
+step = 0
+next_at = time.monotonic()
+last_logged = 0.0
+try:
+    while True:
+        for s in range(SENSORS):
+            line = {"sensor_id": f"s{s}", "value": run * RUN_SPAN + step, "unit": "C"}
+            sys.stdout.write(json.dumps(line) + "\n")
+            step += 1
+        sys.stdout.flush()
+        now = time.monotonic()
+        if now - last_logged >= 60:
+            log.write(f"{time.time():.0f} run {run} written {step}\n")
+            last_logged = now
+        next_at += 1 / RATE_HZ
+        time.sleep(max(0.0, next_at - time.monotonic()))
+except (BrokenPipeError, KeyboardInterrupt):
+    pass
+finally:
+    log.write(f"{time.time():.0f} run {run} end written {step}\n")

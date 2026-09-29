@@ -148,6 +148,10 @@ redelivery, never loss, and the key turns redelivery into a no-op.
 
 - **Persistent session:** the consumer subscribes with one, so the broker holds messages while
   the consumer is down. Keep `--client-id` stable.
+- **Start the consumer before the devices, once.** Until its first connection creates that
+  session, the broker discards messages nobody is subscribed to, and still acknowledges them to
+  SpoolPi, which counts them as delivered. After that first connection, the broker queues
+  everything, through consumer restarts and broker restarts (with broker persistence on).
 - **Bad messages:** a message that can never be stored goes to `spoolpi_dead_letters` instead of
   blocking the stream.
 - **Broker in-flight limit:** manual acknowledgement means the broker's limit caps the batch

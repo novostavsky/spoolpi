@@ -1,0 +1,11 @@
+[Unit]
+Description=SpoolPi soak: a broker outage about four times a day
+
+[Timer]
+# One slot every 6 hours, starting at a random point within it: ~4 outages a day.
+OnCalendar=*-*-* 00/6:00:00
+RandomizedDelaySec=5h
+Persistent=false
+
+[Install]
+WantedBy=timers.target

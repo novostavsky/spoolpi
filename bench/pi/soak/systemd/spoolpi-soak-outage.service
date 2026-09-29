@@ -1,0 +1,7 @@
+[Unit]
+Description=SpoolPi soak: one deliberate broker outage (10-60 min)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/spoolpi-soak/bin/outage.sh
+TimeoutStartSec=infinity

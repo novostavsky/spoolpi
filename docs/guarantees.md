@@ -163,7 +163,10 @@ corrected.
 
 - **Durability at the sink.** An acknowledgement means the sink said it has the data: a PUBACK
   from the MQTT broker, a 2xx from the HTTP server, an fsync for the jsonl sink. An MQTT broker
-  that loses messages after PUBACK loses them. The reference consumer only acknowledges after
+  that loses messages after PUBACK loses them. That includes the ordinary case: a broker
+  discards (and still acknowledges) messages that no subscription or persistent session is
+  waiting for. Start the consumer once before devices publish. Likewise, a broker's queue limit
+  for an offline session (mosquitto: `max_queued_messages`, default 1000) drops the overflow. The reference consumer only acknowledges after
   its Postgres commit.
 - **Multiple writers.** One process writes to a buffer. Two processes writing the same buffer
   file aren't supported.
