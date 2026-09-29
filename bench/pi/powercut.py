@@ -8,10 +8,14 @@ Each cycle:
 
 lost = last step the Pi reported committed - last step found in the buffer.
 
-Needs on the Pi: the repo deployed (bench/pi/deploy.sh) and passwordless
-`sudo tee /proc/sysrq-trigger`.
+With --manual, step 2 is yours: the script says when to pull the Pi's power plug,
+notices the Pi drop off, and tells you to plug it back in. A real pull also cuts
+the SD card's power, which a sysrq reset doesn't.
 
-Usage: python bench/pi/powercut.py <cycles> <power|process> [host] [seed]
+Needs on the Pi: the repo deployed (bench/pi/deploy.sh) and passwordless
+`sudo tee /proc/sysrq-trigger` (not needed with --manual).
+
+Usage: python bench/pi/powercut.py <cycles> <power|process> [host] [seed] [--manual]
        (NORMAL / FULL, the SQLite modes behind them, are accepted too)
 """
 
@@ -68,7 +72,9 @@ def boot_id(host: str) -> str:
     return ssh(host, "cat /proc/sys/kernel/random/boot_id", timeout=15).stdout.strip()
 
 
-def cycle(host: str, i: int, synchronous: str, rng: random.Random) -> dict[str, object]:
+def cycle(
+    host: str, i: int, synchronous: str, rng: random.Random, manual: bool = False
+) -> dict[str, object]:
     start = i * SPAN
     # Let the boot finish and get its own writes onto the card first. Otherwise a cut can
     # land in the OS's boot-time writes: on 09-29 one left NetworkManager's netplan files
@@ -78,6 +84,11 @@ def cycle(host: str, i: int, synchronous: str, rng: random.Random) -> dict[str, 
     child = subprocess.Popen(
         [
             "ssh",
+            # A dead Pi sends no FIN; notice it within ~3 s (what --manual waits for).
+            "-o",
+            "ServerAliveInterval=1",
+            "-o",
+            "ServerAliveCountMax=3",
             host,
             f"{PY} && mkdir -p ~/spoolpi-powercut && exec python bench/pi/powercut_child.py ~/{DB} {start} {synchronous}",
         ],
@@ -103,24 +114,50 @@ def cycle(host: str, i: int, synchronous: str, rng: random.Random) -> dict[str, 
             child.kill()
             raise RuntimeError("the writer on the Pi didn't start (is the repo deployed?)")
         time.sleep(0.1)
-    run_for = rng.uniform(5, 120)
-    time.sleep(run_for)
-    # The reset: no sync, no unmount. Our SSH session just dies without a
-    # FIN, so this call hangs until the timeout; that's the expected outcome.
-    try:
-        subprocess.run(
-            ["ssh", host, "echo b | sudo -n tee /proc/sysrq-trigger"],
-            capture_output=True,
-            timeout=10,
-            check=False,
+    if manual:
+        started = time.monotonic()
+        print(
+            f"\n>>> Cut {i + 1}: the Pi is writing. PULL THE POWER PLUG now, or whenever you "
+            "like (more than ~5 s from now).",
+            flush=True,
         )
-    except subprocess.TimeoutExpired:
-        pass
-    last_reported = reported["last"]
-    child.kill()
-    boot_s = wait_until_up(host)
+        reader.join()  # the stream ends when the Pi goes dark (ServerAlive notices in ~3 s)
+        run_for = time.monotonic() - started - 3
+        last_reported = reported["last"]
+        child.kill()
+        print(
+            f">>> The Pi is off (last commit it reported: {last_reported - start + 1} readings). "
+            "Wait ~5 s, then PLUG IT BACK IN.",
+            flush=True,
+        )
+        boot_s = wait_until_up(host, timeout=900)
+        print(">>> It's back. Checking the buffer...", flush=True)
+    else:
+        run_for = rng.uniform(5, 120)
+        time.sleep(run_for)
+        # The reset: no sync, no unmount. Our SSH session just dies without a
+        # FIN, so this call hangs until the timeout; that's the expected outcome.
+        try:
+            subprocess.run(
+                ["ssh", host, "echo b | sudo -n tee /proc/sysrq-trigger"],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            pass
+        last_reported = reported["last"]
+        child.kill()
+        boot_s = wait_until_up(host)
     if boot_id(host) == boot_before:
-        raise RuntimeError("the Pi didn't reboot (is the sysrq sudo rule in place?)")
+        raise RuntimeError(
+            "the Pi didn't reboot"
+            + (
+                " (did the network drop instead?)"
+                if manual
+                else " (is the sysrq sudo rule in place?)"
+            )
+        )
     probe = ssh(host, f"{PY} && python -c '{INSPECT}' ~/{DB} {start} {start + SPAN}")
     found = json.loads(probe.stdout)
     top = start - 1 if found["top"] is None else int(found["top"])
@@ -136,17 +173,23 @@ def cycle(host: str, i: int, synchronous: str, rng: random.Random) -> dict[str, 
 
 
 def main() -> None:
-    cycles, synchronous = int(sys.argv[1]), sys.argv[2].upper()
-    host = sys.argv[3] if len(sys.argv) > 3 else HOST
-    seed = int(sys.argv[4]) if len(sys.argv) > 4 else random.randrange(2**32)
+    manual = "--manual" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--manual"]
+    cycles, synchronous = int(args[0]), args[1].upper()
+    host = args[2] if len(args) > 2 else HOST
+    seed = int(args[3]) if len(args) > 3 else random.randrange(2**32)
     rng = random.Random(seed)
-    print(f"power-cut test: {cycles} cycles, synchronous={synchronous}, seed={seed}", flush=True)
+    how = "manual plug pulls" if manual else "sysrq resets"
+    print(
+        f"power-cut test: {cycles} cycles ({how}), synchronous={synchronous}, seed={seed}",
+        flush=True,
+    )
     ssh(host, "rm -rf ~/spoolpi-powercut && sync")
     results = []
     stopped = ""
     for i in range(cycles):
         try:
-            r = cycle(host, i, synchronous, rng)
+            r = cycle(host, i, synchronous, rng, manual)
         except TimeoutError as e:
             # The Pi didn't come back: stop rather than lose track of it; keep what we have.
             stopped = f"; STOPPED at cut {i}: {e}"
