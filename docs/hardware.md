@@ -141,12 +141,38 @@ pi ALL=(root) NOPASSWD: /usr/bin/tee /proc/sysrq-trigger, /usr/bin/systemctl * s
 | 2 | 82 s | 816 | 816 | 0 | ok |
 | 3 | 21 s | 211 | 211 | 0 | ok |
 
-- **Every committed reading survived every cut.** That includes the 21 s cut, a length that
-  lost everything under `NORMAL`.
-- Only the uncommitted batch can be lost. At 10 readings/s that's up to 1 s, as for a process
-  crash.
-- It's only 4 cuts, but they agree with how `FULL` works: every commit fsyncs the WAL before it
-  returns.
+That run stopped at the 5th reset, when the Pi lost its network (next section). After the repair,
+the run resumed with the harness waiting for each boot to finish and syncing first.
+
+### `synchronous=FULL`, seed 13 (16 more cuts)
+
+| Cut | Ran | Committed = survived | Lost | Cut | Ran | Committed = survived | Lost |
+|---|---|---|---|---|---|---|---|
+| 0 | 35 s | 353 | 0 | 8 | 89 s | 892 | 0 |
+| 1 | 84 s | 837 | 0 | 9 | 20 s | 199 | 0 |
+| 2 | 84 s | 837 | 0 | 10 | 66 s | 661 | 0 |
+| 3 | 103 s | 1,024 | 0 | 11 | 30 s | 298 | 0 |
+| 4 | 26 s | 265 | 0 | 12 | 39 s | 386 | 0 |
+| 5 | 32 s | 320 | 0 | 13 | 55 s | 551 | 0 |
+| 6 | 22 s | 221 | 0 | 14 | 101 s | 1,013 | 0 |
+| 7 | 31 s | 309 | 0 | 15 | 75 s | 749 | 0 |
+
+Integrity was ok after all 16. The Pi booted back in 40–58 s every time.
+
+**`NORMAL` vs `FULL`, summed up:**
+
+| | `NORMAL` (10 cuts) | `FULL` (20 cuts) |
+|---|---|---|
+| Committed readings lost per cut | 44–352 (median 253) | **0** |
+| Cuts that lost anything | 10 / 10 | **0 / 20** |
+| Integrity failures | 0 | 0 |
+| Commit latency, batch 50 (p50 / p99) | 3.8 / 66 ms | 13 / 115 ms |
+
+- **Under `FULL`, every committed reading survived every cut.** That includes cuts of 20–26 s,
+  a length that lost everything under `NORMAL`.
+- **Only the uncommitted batch can be lost.** At 10 readings/s that's up to 1 s, the same as a
+  process crash.
+- That matches how `FULL` works: every commit fsyncs the WAL before it returns.
 
 ### A power cut after boot left the Pi without Wi-Fi for good
 

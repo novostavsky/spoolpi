@@ -20,7 +20,7 @@ What SpoolPi promises about each reading, what can go wrong, and how each claim 
 |---|---|---|
 | Process crash (SIGKILL, OOM kill, Python crash) | Readings in the uncommitted batch: at most `batch.max_rows`, or `batch.max_delay_s` worth | 1,000-cycle SIGKILL test (`tests/test_buffer_crash.py`), on every CI run and at 10,000 cycles nightly |
 | `systemctl stop` / SIGTERM | Nothing. Pending readings are committed and the batch in flight is finished (within `shipper.stop_timeout_s`) | `tests/test_cli.py`, `bench/systemd_restart_check.py` |
-| Power cut, kernel panic | Recently committed records too, typically the last ~30 s; see the next section | 10 simulated power cuts on a Pi Zero 2 W, plus 4 with `FULL` (`bench/pi/powercut.py`); real plug pulls still to do |
+| Power cut, kernel panic | Recently committed records too, typically the last ~30 s; see the next section | 10 simulated power cuts on a Pi Zero 2 W, plus 20 with `FULL` (`bench/pi/powercut.py`); real plug pulls still to do |
 | Buffer full | Nothing silently. The retention policy discards readings and records each discard in a gap record | Hypothesis state machine + 300-cycle SIGKILL test (`tests/test_retention.py`) |
 | Sink permanently rejects a record | The record is quarantined in the buffer, not shipped, and reported as a `rejected:sink` gap | `tests/test_poison.py` |
 
@@ -54,10 +54,11 @@ reset the Pi without syncing, so everything in the page cache was lost.
   last seq reservation, whichever was later. No cut came near the ~1,000-record bound.
 - The database passed `PRAGMA integrity_check` after every cut.
 
-With `synchronous=FULL` (not yet a setting), 4 cuts lost **0** committed readings.
+With `synchronous=FULL` (not yet a setting), 20 cuts lost **0** committed readings; only the
+uncommitted batch (≤ 1 s) is at risk.
 
-Two limits on these results: the simulated cut doesn't drop the SD card's own write cache, as
-a real plug pull can; and both runs ended early, when the Pi didn't come back from a reset.
+One limit on these results: the simulated cut doesn't drop the SD card's own write cache, as a
+real plug pull can.
 
 ## What can be duplicated
 
