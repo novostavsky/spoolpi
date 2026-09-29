@@ -22,4 +22,6 @@ cd ~/spoolpi
 echo "== syncing the locked environment (first run downloads wheels for aarch64)"
 uv sync --locked --extra dev --quiet
 .venv/bin/spoolpi --version
+# The power-cut test resets the Pi without syncing; make sure the deploy itself is on disk.
+sync
 EOF

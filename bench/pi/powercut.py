@@ -31,7 +31,11 @@ PY = "cd ~/spoolpi && PATH=$HOME/spoolpi/.venv/bin:$PATH"
 
 def ssh(host: str, command: str, timeout: float = 60) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["ssh", host, command], capture_output=True, text=True, timeout=timeout, check=False
+        ["ssh", "-o", "ConnectTimeout=10", host, command],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
     )
 
 
@@ -39,8 +43,11 @@ def wait_until_up(host: str, timeout: float = 300) -> float:
     t0 = time.monotonic()
     time.sleep(10)  # it's going down; don't catch it before the reset lands
     while time.monotonic() - t0 < timeout:
-        if ssh(host, "true", timeout=15).returncode == 0:
-            return time.monotonic() - t0
+        try:
+            if ssh(host, "true", timeout=15).returncode == 0:
+                return time.monotonic() - t0
+        except subprocess.TimeoutExpired:
+            pass
         time.sleep(5)
     raise TimeoutError(f"{host} didn't come back within {timeout} s")
 
@@ -56,8 +63,13 @@ print(json.dumps({"integrity": ok, "top": top, "count": count}))
 """
 
 
+def boot_id(host: str) -> str:
+    return ssh(host, "cat /proc/sys/kernel/random/boot_id", timeout=15).stdout.strip()
+
+
 def cycle(host: str, i: int, synchronous: str, rng: random.Random) -> dict[str, object]:
     start = i * SPAN
+    boot_before = boot_id(host)
     child = subprocess.Popen(
         [
             "ssh",
@@ -88,16 +100,22 @@ def cycle(host: str, i: int, synchronous: str, rng: random.Random) -> dict[str, 
         time.sleep(0.1)
     run_for = rng.uniform(5, 120)
     time.sleep(run_for)
-    # The reset: no sync, no unmount. Our SSH session just dies.
-    subprocess.run(
-        ["ssh", host, "echo b | sudo -n tee /proc/sysrq-trigger"],
-        capture_output=True,
-        timeout=15,
-        check=False,
-    )
+    # The reset: no sync, no unmount. Our SSH session just dies without a
+    # FIN, so this call hangs until the timeout; that's the expected outcome.
+    try:
+        subprocess.run(
+            ["ssh", host, "echo b | sudo -n tee /proc/sysrq-trigger"],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        pass
     last_reported = reported["last"]
     child.kill()
     boot_s = wait_until_up(host)
+    if boot_id(host) == boot_before:
+        raise RuntimeError("the Pi didn't reboot (is the sysrq sudo rule in place?)")
     probe = ssh(host, f"{PY} && python -c '{INSPECT}' ~/{DB} {start} {start + SPAN}")
     found = json.loads(probe.stdout)
     top = start - 1 if found["top"] is None else int(found["top"])
@@ -118,7 +136,7 @@ def main() -> None:
     seed = int(sys.argv[4]) if len(sys.argv) > 4 else random.randrange(2**32)
     rng = random.Random(seed)
     print(f"power-cut test: {cycles} cycles, synchronous={synchronous}, seed={seed}", flush=True)
-    ssh(host, "rm -rf ~/spoolpi-powercut")
+    ssh(host, "rm -rf ~/spoolpi-powercut && sync")
     results = []
     for i in range(cycles):
         r = cycle(host, i, synchronous, rng)
