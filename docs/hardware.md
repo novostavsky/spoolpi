@@ -204,6 +204,15 @@ reflashed, though, so it's unconfirmed.
    the Wi-Fi password.
 3. `sync`, and check the card again with `e2fsck -fn`: clean.
 
+**After the repair: the files are rewritten on every boot.**
+- **First boot after the repair:** NetworkManager took over `50-cloud-init.yaml`. It removed that
+  file and wrote the two `90-NM-*.yaml` profiles again, now 591 and 275 bytes.
+- **After a clean `sudo reboot`:** both profiles were rewritten again, about 25–30 s after
+  power-on, with identical sizes and no configuration change.
+
+So this isn't a one-off: **every boot of this image has a window, roughly 25–60 s after
+power-on, in which a power cut can erase the network configuration.**
+
 **What it means.**
 - **For SpoolPi:** nothing changes. Its buffer passed `integrity_check` after every cut, including
   the one that broke the network.

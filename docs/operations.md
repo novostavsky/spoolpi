@@ -63,8 +63,9 @@ shutdown path (a UPS HAT, or a supercapacitor with a shutdown signal), because
 
 **The operating system is more fragile than the buffer.** In testing on Raspberry Pi OS trixie, a
 power cut shortly after boot left the Pi permanently without Wi-Fi. NetworkManager rewrites its
-connection files in `/etc/netplan/` during boot. The cut landed before the new contents reached
-the card, leaving them empty, and every later boot came up with no network. SpoolPi's buffer was
+connection files in `/etc/netplan/` on every boot, about 25–30 s after power-on. The cut landed
+before the new contents reached the card, leaving them empty, and every later boot came up with
+no network. The window is roughly 25–60 s after power-on, on every boot. SpoolPi's buffer was
 intact, but a device that can't connect ships nothing. The full account is in
 [`hardware.md`](hardware.md#a-power-cut-after-boot-left-the-pi-without-wi-fi-for-good).
 
