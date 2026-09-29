@@ -6,6 +6,7 @@ Needs the ``consumer`` extra (psycopg >= 3.1).
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -13,6 +14,8 @@ from importlib.resources import files
 from typing import Any, Final
 
 import psycopg
+
+log = logging.getLogger("spoolpi.consumer")
 
 SCHEMA_SQL: Final = files("spoolpi.consumer").joinpath("schema.sql").read_text()
 
@@ -33,6 +36,29 @@ _INSERT_GAP: Final = """
 _INSERT_DEAD: Final = (
     "INSERT INTO spoolpi_dead_letters (source, payload, error) VALUES (%s, %s, %s)"
 )
+# Keep the offset from the earliest trusted reading of a boot: it's the closest to
+# the pre-sync readings it corrects.
+_UPSERT_BOOT_CLOCK: Final = """
+    INSERT INTO spoolpi_boot_clocks (boot_id, offset_ns, mono_ns) VALUES (%s, %s, %s)
+    ON CONFLICT (boot_id) DO UPDATE
+        SET offset_ns = excluded.offset_ns, mono_ns = excluded.mono_ns, updated_at = now()
+        WHERE excluded.mono_ns < spoolpi_boot_clocks.mono_ns
+"""
+_CORRECT_UNSYNCED: Final = """
+    UPDATE spoolpi_readings r
+       SET wall_ns_device = r.wall_ns, wall_ns = r.mono_ns + c.offset_ns, ts_quality = 1
+      FROM spoolpi_boot_clocks c
+     WHERE r.ts_quality = 0 AND r.boot_id = c.boot_id AND r.boot_id = ANY(%s)
+       AND r.mono_ns >= 0 AND r.mono_ns < %s
+"""
+_TS_UNSYNCED: Final = 0
+# Offsets and mono_ns used for correction stay below 2**62, so mono_ns + offset_ns can't
+# overflow bigint. A garbage record could otherwise fail the batch on every retry.
+# Real values are far smaller: mono_ns ~ uptime, wall_ns ~ 1.8e18 in 2027.
+_SANE: Final = range(2**62)
+
+# Positions in a reading's insert parameters (see _row).
+_MONO, _WALL, _BOOT, _QUALITY = 6, 7, 8, 9
 
 
 class BadRecord(ValueError):
@@ -51,6 +77,7 @@ class StoreResult:
     gaps: int = 0
     duplicates: int = 0
     dead_letters: int = 0
+    corrected: int = 0  # earlier or incoming ts_quality 0 readings given their boot's offset
 
 
 def apply_schema(conn: psycopg.Connection[Any]) -> None:
@@ -132,10 +159,16 @@ def _row(record: Any) -> tuple[str, tuple[Any, ...]]:
 def store(conn: psycopg.Connection[Any], messages: Iterable[Incoming]) -> StoreResult:
     """Store a batch in one transaction. Duplicates are ignored, bad messages dead-lettered.
 
+    Readings shipped before the device's clock synced (ts_quality 0) are corrected
+    in the same transaction once any trusted reading of their boot has arrived,
+    in this batch or an earlier one.
+
     Connection-level errors (psycopg.OperationalError) propagate: nothing is
     committed, and the caller should retry the whole batch.
     """
     result = StoreResult()
+    offsets: dict[str, tuple[int, int]] = {}  # boot_id -> (mono_ns, offset_ns), earliest
+    boots: set[str] = set()  # boots that got new readings, trusted or not
     with conn.transaction(), conn.cursor() as cur:
         for message in messages:
             try:
@@ -157,6 +190,22 @@ def store(conn: psycopg.Connection[Any], messages: Iterable[Incoming]) -> StoreR
                 result.duplicates += 1
             elif kind == "reading":
                 result.readings += 1
+                boot = params[_BOOT]
+                boots.add(boot)
+                mono, wall = params[_MONO], params[_WALL]
+                trusted = params[_QUALITY] != _TS_UNSYNCED and mono in _SANE and wall in _SANE
+                if trusted and (boot not in offsets or mono < offsets[boot][0]):
+                    offsets[boot] = (mono, wall - mono)
             else:
                 result.gaps += 1
+        if boots:
+            try:
+                # Its own savepoint: a correction problem must never cost the batch.
+                with conn.transaction():
+                    for boot, (mono, offset) in offsets.items():
+                        cur.execute(_UPSERT_BOOT_CLOCK, (boot, offset, mono))
+                    cur.execute(_CORRECT_UNSYNCED, (sorted(boots), _SANE.stop))
+                    result.corrected = cur.rowcount
+            except (psycopg.DataError, psycopg.IntegrityError) as e:
+                log.warning("couldn't correct unsynced timestamps in this batch: %s", e)
     return result

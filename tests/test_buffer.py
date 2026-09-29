@@ -55,9 +55,27 @@ def test_roundtrip_is_exact(buf: Buffer, batch: list[Reading]) -> None:
 def test_pragmas(buf: Buffer) -> None:
     conn = buf._conn
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-    assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1  # NORMAL
+    assert conn.execute("PRAGMA synchronous").fetchone()[0] == 2  # FULL: durability="power"
     assert conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0] == 1000
     assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+
+
+def test_process_durability_uses_normal(tmp_path: Path) -> None:
+    with Buffer(tmp_path / "b.db", durability="process") as b:
+        assert b._conn.execute("PRAGMA synchronous").fetchone()[0] == 1  # NORMAL
+
+
+def test_seq_reservation_keeps_the_handles_durability(tmp_path: Path) -> None:
+    # The reservation switches to FULL for its own commit and must switch back.
+    for durability, expected in (("process", 1), ("power", 2)):
+        with Buffer(tmp_path / f"{durability}.db", durability=durability) as b:
+            b.append([Reading("s", 1.0, None, 1, 1, "boot")])
+            assert b._conn.execute("PRAGMA synchronous").fetchone()[0] == expected
+
+
+def test_unknown_durability_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="durability"):
+        Buffer(tmp_path / "b.db", durability="sometimes")  # type: ignore[arg-type]
 
 
 def test_failed_read_is_stored_and_shipped(buf: Buffer) -> None:

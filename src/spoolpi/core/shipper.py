@@ -4,6 +4,11 @@ The shipper runs on its own thread with its own buffer handle, so the writer
 never waits on it: the buffer is the queue. Rows the sink didn't accept go back
 to pending and are retried first. A crash between send and ack means those rows
 are sent again after restart; that's the at-least-once contract.
+
+Timestamps are corrected at ship time, so a reading shipped before the clock
+syncs goes out uncorrected. With ``hold_unsynced_s``, a shipper that starts
+before the clock has synced holds readings back (gap records still ship) until
+the clock syncs or the hold runs out, whichever comes first.
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from spoolpi.core.buffer import Buffer
+from spoolpi.core.buffer import Buffer, Durability
 from spoolpi.core.clock import ClockAnchor
 from spoolpi.core.reading import Reading
 from spoolpi.core.retention import GapRecord
@@ -83,9 +88,16 @@ class Shipper:
         purge_interval_s: float = 60.0,
         max_abandoned_sends: int = 4,
         anchor: ClockAnchor | None = None,
+        hold_unsynced_s: float = 0.0,
+        durability: Durability = "power",
         rng: random.Random | None = None,
     ) -> None:
+        """``hold_unsynced_s`` needs ``anchor``; 0 ships at once, as before."""
         self._db_path = Path(db_path)
+        self._durability: Durability = durability
+        self._hold_s = hold_unsynced_s if anchor is not None else 0.0
+        self._hold_until: float | None = None  # set by start()
+        self._holding = False
         self._sink = sink
         self._batch_size = batch_size
         self._send_timeout_s = send_timeout_s
@@ -104,6 +116,8 @@ class Shipper:
         self.stats = ShipperStats()
 
     def start(self) -> None:
+        if self._hold_s > 0:
+            self._hold_until = time.monotonic() + self._hold_s
         self._thread = threading.Thread(target=self._run, name="spoolpi-shipper", daemon=True)
         self._thread.start()
 
@@ -139,7 +153,7 @@ class Shipper:
                 self._wake.clear()
                 try:
                     if buf is None:
-                        buf = Buffer(self._db_path)
+                        buf = Buffer(self._db_path, durability=self._durability)
                     outcome = self._ship_once(buf)
                     if time.monotonic() >= next_purge:
                         # Chunked so each delete transaction stays short, but repeated
@@ -188,6 +202,8 @@ class Shipper:
                 buf.release_gaps,
                 buf.reject_gaps,
             )
+        if self._hold_readings():
+            return _Outcome.EMPTY
         claimed = buf.claim(self._batch_size)
         if not claimed:
             return _Outcome.EMPTY
@@ -242,6 +258,34 @@ class Shipper:
         if now - self._last_rejection_log >= _WARN_INTERVAL_S:
             log.error(message + " (repeats suppressed for 60 s)", *args)
             self._last_rejection_log = now
+
+    def _hold_readings(self) -> bool:
+        """True while readings wait for the clock: started unsynced, and the hold hasn't run out."""
+        if self._hold_until is None:
+            return False
+        assert self._anchor is not None  # _hold_s is 0 without one
+        if self._anchor.anchor is not None:
+            if self._holding:
+                log.info("clock synchronised; shipping held readings with corrected timestamps")
+            self._hold_until = None
+        elif time.monotonic() >= self._hold_until:
+            log.warning(
+                "clock still not synchronised after %g s; shipping readings with "
+                "uncorrected timestamps (ts_quality 0)",
+                self._hold_s,
+            )
+            self._hold_until = None
+        elif not self._holding:
+            log.info(
+                "clock not synchronised; holding readings for up to %g s so their "
+                "timestamps can be corrected",
+                self._hold_s,
+            )
+            self._holding = True
+        if self._hold_until is None:
+            self._holding = False
+            return False
+        return True
 
     def _correct(self, reading: Reading) -> Reading:
         return self._anchor.correct(reading) if self._anchor is not None else reading

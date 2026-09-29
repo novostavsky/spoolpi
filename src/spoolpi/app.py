@@ -95,6 +95,7 @@ class SpoolPi:
             config.buffer_path,
             retention=config.retention,
             wal_autocheckpoint=config.wal_autocheckpoint,
+            durability=config.durability,
         )
         # Rows a previous process claimed but never acked; resent (at-least-once).
         self._buffer.recover_inflight()
@@ -118,6 +119,8 @@ class SpoolPi:
             poll_interval_s=s.poll_interval_s,
             purge_interval_s=s.purge_interval_s,
             anchor=self._anchor,
+            hold_unsynced_s=s.hold_unsynced_s,
+            durability=config.durability,
         )
         self._shipper.start()
         self._closed = False

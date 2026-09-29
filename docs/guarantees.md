@@ -20,18 +20,26 @@ What SpoolPi promises about each reading, what can go wrong, and how each claim 
 |---|---|---|
 | Process crash (SIGKILL, OOM kill, Python crash) | Readings in the uncommitted batch: at most `batch.max_rows`, or `batch.max_delay_s` worth | 1,000-cycle SIGKILL test (`tests/test_buffer_crash.py`), on every CI run and at 10,000 cycles nightly |
 | `systemctl stop` / SIGTERM | Nothing. Pending readings are committed and the batch in flight is finished (within `shipper.stop_timeout_s`) | `tests/test_cli.py`, `bench/systemd_restart_check.py` |
-| Power cut, kernel panic | Recently committed records too, typically the last ~30 s; see the next section | 10 simulated power cuts on a Pi Zero 2 W, plus 20 with `FULL` (`bench/pi/powercut.py`); real plug pulls still to do |
+| Power cut, kernel panic | With `durability = "power"` (the default): the uncommitted batch, as for a crash. With `"process"`: also the commits of roughly the last 30 s. See the next section | 25 simulated power cuts on a Pi Zero 2 W with `"power"`, 10 with `"process"` (`bench/pi/powercut.py`); real plug pulls still to do |
 | Buffer full | Nothing silently. The retention policy discards readings and records each discard in a gap record | Hypothesis state machine + 300-cycle SIGKILL test (`tests/test_retention.py`) |
 | Sink permanently rejects a record | The record is quarantined in the buffer, not shipped, and reported as a `rejected:sink` gap | `tests/test_poison.py` |
 
 ### Power cuts
 
-The buffer runs SQLite in WAL mode with `synchronous=NORMAL`. A commit is durable against a
-**process** crash as soon as it returns. It becomes durable against a **power** cut only when
-the write-ahead log is next fsynced, and SQLite doesn't fsync on every commit in this mode. The
-file itself is never corrupted: on restart SQLite discards the unsynced tail of the log.
+The buffer runs SQLite in WAL mode. `[buffer] durability` decides when a commit is safe from a
+power cut. In both modes, the file itself is never corrupted: on restart SQLite discards any
+unsynced tail of the log.
 
-Two things fsync the log, and together they bound the loss:
+**`durability = "power"` (the default)** uses `synchronous=FULL`. Every commit fsyncs the log
+before it returns, so a committed reading survives a power cut exactly as it survives a crash.
+The same holds for the acknowledgements and gap records written in those commits. **What a
+power cut loses:** the uncommitted batch, at most `batch.max_rows` readings or
+`batch.max_delay_s` worth.
+
+**`durability = "process"`** uses `synchronous=NORMAL`. A commit is durable against a **process**
+crash as soon as it returns. It becomes durable against a **power** cut only when the log is
+next fsynced, and in this mode SQLite doesn't fsync on every commit. Two things fsync the log,
+and together they bound the loss:
 
 - Every `seq` block reservation, one per 1,000 records by default, is committed with
   `synchronous=FULL`. That fsyncs everything written before it. The reason is that a power cut
@@ -41,21 +49,23 @@ Two things fsync the log, and together they bound the loss:
 
 Separately, the kernel writes dirty pages out within about 30 seconds on its own.
 
-**Design bound:** a power cut loses at most the records committed since the last reservation
-(up to ~1,000), plus the uncommitted batch, and usually only the last ~30 seconds. Readings
-that roll back are simply gone. Records that had shipped but whose acknowledgement rolled back
-are sent again under the same key.
+**Design bound for `"process"`:** a power cut loses at most the records committed since the
+last reservation (up to ~1,000), plus the uncommitted batch, and usually only the last ~30
+seconds. Readings that roll back are simply gone. Records that had shipped but whose
+acknowledgement rolled back are sent again under the same key.
 
-**Measured** (2026-09-29, [`hardware.md`](hardware.md#power-cuts-benchpipowercutpy)): 10
-simulated power cuts on a Raspberry Pi Zero 2 W writing 10 readings/s to an SD card. Each cut
-reset the Pi without syncing, so everything in the page cache was lost.
-- Every cut lost committed readings: 44 to 352, median 253. That's the last 4–35 s.
-- What survived was what the kernel had written back on its 30 s timer, or everything up to the
-  last seq reservation, whichever was later. No cut came near the ~1,000-record bound.
-- The database passed `PRAGMA integrity_check` after every cut.
+**Measured** (2026-09-29, [`hardware.md`](hardware.md#power-cuts-benchpipowercutpy)) on a
+Raspberry Pi Zero 2 W writing 10 readings/s to an SD card. Each simulated cut reset the Pi
+without syncing, so everything in the page cache was lost.
 
-With `synchronous=FULL` (not yet a setting), 20 cuts lost **0** committed readings; only the
-uncommitted batch (≤ 1 s) is at risk.
+| | `"power"` (25 cuts) | `"process"` (10 cuts) |
+|---|---|---|
+| Committed readings lost per cut | **0** | 44–352 (median 253): the last 4–35 s |
+| Integrity check after the cut | ok 25/25 | ok 10/10 |
+
+Under `"process"`, what survived was what the kernel had written back on its 30 s timer, or
+everything up to the last seq reservation, whichever was later. No cut came near the
+~1,000-record bound.
 
 One limit on these results: the simulated cut doesn't drop the SD card's own write cache, as a
 real plug pull can.
@@ -104,22 +114,43 @@ Every reading carries three clocks:
 | 1 (corrected) | sampled before sync; `wall_ns` was recomputed at ship time from `mono_ns` and the offset measured once the clock synced (same boot only) |
 | 0 (unsynced) | sampled before sync and shipped uncorrected: `wall_ns` may be 1970 or simply wrong |
 
-Correction happens when a reading is shipped, so a reading ships as 0 when:
-- it was **shipped before the clock synced** (the uplink came up before NTP did, as on a LAN
-  with a local broker); or
-- the device **rebooted** before syncing, because the correction needs the offset measured in
-  the same boot.
+Correction happens in two places.
 
-A receiver can still fix quality-0 readings itself. `mono_ns` and `boot_id` are exact, so any
-synced reading from the same boot gives the offset: `wall ≈ mono_ns + (wall_ns − mono_ns)` of
-that synced reading.
+**1. On the device, when a reading ships.** The correction needs the offset measured once the
+clock synced, in the same boot. So a shipper that starts with the clock unsynced **holds
+readings** for up to `[shipper] hold_unsynced_s` (default 120 s). Gap records still ship. As
+soon as the clock syncs, the held readings ship as `ts_quality = 1`. A reading still ships as 0
+when:
+- the clock didn't sync within the hold (no NTP, no network), or the hold is set to 0; or
+- the device **rebooted** before its clock synced.
+
+**2. At the receiver, afterwards.** `mono_ns` and `boot_id` are exact, so any trusted reading of
+the same boot gives the offset: `offset = wall_ns − mono_ns`. The reference consumer does this
+automatically:
+- it keeps each boot's offset in `spoolpi_boot_clocks`, from the earliest trusted reading;
+- when the offset is known, whether the quality-0 readings came earlier or later, it sets their
+  `wall_ns = mono_ns + offset` and `ts_quality = 1`;
+- it keeps the device's original value in `wall_ns_device`.
+
+The same offset gives a gap its wall time:
+
+```sql
+SELECT g.*, to_timestamp((g.from_mono_ns + c.offset_ns) / 1e9) AS from_ts,
+            to_timestamp((g.to_mono_ns   + c.offset_ns) / 1e9) AS to_ts
+FROM spoolpi_gaps g JOIN spoolpi_boot_clocks c USING (boot_id);
+```
+
+A reading stays at 0 only if its whole boot produced no trusted reading at all.
 
 Sync is read from the kernel (`adjtimex`), with `timedatectl` as a fallback. The correction was
 verified against an injected clock offset in a real Linux time namespace, accurate to within
 26 ns. On a Raspberry Pi Zero 2 W, it corrected readings to within 3 µs across a real 30-day
 step by `systemd-timesyncd` ([`hardware.md`](hardware.md#clock-without-an-rtc-benchpiclock_coldbootpy)).
-The same test confirmed the limit above: with the uplink up before sync, the pre-sync readings
-shipped uncorrected.
+Before the hold existed, the same test showed why it's needed: with the uplink up before sync,
+640 of 650 pre-sync readings shipped 30 days wrong. The hold is covered by
+`tests/test_shipper.py`, and the consumer's correction by `tests/test_consumer.py` against a
+real PostgreSQL. On the Pi, with the hold at its default, the same scenario shipped all 650
+corrected.
 
 ## What SpoolPi does not promise
 

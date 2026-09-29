@@ -5,6 +5,41 @@ Raspberry Pi OS on Debian 13 (trixie), 64-bit kernel, Python 3.13.5, with a 256 
 The scripts are in `bench/pi/`. `bash bench/pi/deploy.sh` pushes the working tree to the Pi,
 and `bash bench/pi/run.sh <command>` runs a command there.
 
+## Known issues when testing on a Pi
+
+These affect the test setup, not SpoolPi, but each one cost a test run. They are not reported
+upstream.
+
+1. **A power cut 25–60 s after boot can erase the Pi's network configuration** (Raspberry Pi OS
+   trixie).
+   - **What happens:** NetworkManager rewrites its profiles in `/etc/netplan/90-NM-*.yaml` on
+     every boot, about 25–30 s after power-on. A cut before the kernel writes them back leaves
+     them 0 bytes, and from then on the Pi boots without network. Power cycles don't help.
+   - **Seen:** twice in 16 simulated cuts, before the harness waited for boot. The account is
+     under [Power cuts](#a-power-cut-after-boot-left-the-pi-without-wi-fi-for-good).
+   - **Avoid it:** before a cut, wait for `systemctl is-system-running --wait`, then run `sync`.
+     `bench/pi/powercut.py` does both before every run. For hand plug pulls, wait at least a
+     minute after the Pi comes up.
+   - **Recover:** restore the profile from Imager's `network-config` on the boot partition
+     (steps in [`operations.md`](operations.md#power-cuts)).
+
+2. **Anything written in the last ~30 s is at risk, including your own setup.** A reset seconds
+   after `uv sync` left an empty `METADATA` file and a broken venv. `bench/pi/deploy.sh` ends
+   with `sync`; do the same after any manual change on the Pi.
+
+3. **The system journal doesn't survive a reboot.** This image logs to RAM only
+   (`Storage=volatile`), so a boot that fails leaves no journal behind.
+   `/var/log/cloud-init.log`, which is written on every boot, was the useful timeline. For
+   long test campaigns, consider `Storage=persistent` in `/etc/systemd/journald.conf`. That
+   means more writes, but also evidence.
+
+4. **Diagnosing a card on Windows needs `usbipd`.** `wsl --mount` refuses USB card readers.
+   `usbipd bind` + `usbipd attach --wsl` passes the reader through. Then, to keep evidence
+   intact:
+   - lock the device with `blockdev --setro`;
+   - check with `e2fsck -fn`;
+   - mount with `-o ro,noload`.
+
 ## Test suite on ARM64 (2026-09-29)
 
 The fast suite runs on the Pi too: **216 passed, 20 skipped** (the mosquitto and PostgreSQL
@@ -81,12 +116,15 @@ The wall-clock error of each delivered reading is measured against the post-sync
 |---|---|---|---|
 | **online**: uplink up before sync (jsonl) | **640, all 30 days wrong** | 10, error 3 µs | 590, error ≤ 5 µs |
 | **offline**: uplink only after sync (MQTT, broker started after the step) | **0** | 650, error ≤ 3 µs | 590, error ≤ 8 µs |
+| **online, with `hold_unsynced_s = 120`** (the default since 09-29) | **0** | 650, error 3 µs | 590, error ≤ 89 µs |
 
 - **Correction is exact:** 3 µs against a real 30-day NTP step. It applies whenever the readings
   are still buffered at sync time.
-- **Readings shipped before sync stay wrong.** With the uplink up first, every pre-sync reading
-  except the last unsent batch shipped 30 days off, marked `ts_quality = 0`. On an RTC-less Pi on
-  a LAN, that's every boot until timesyncd syncs. See the time section in
+- **Readings shipped before sync stay wrong.** Without the hold, with the uplink up first,
+  every pre-sync reading except the last unsent batch shipped 30 days off, marked
+  `ts_quality = 0`. On an RTC-less Pi on a LAN, that's every boot until timesyncd syncs.
+- **The hold fixes it.** With `[shipper] hold_unsynced_s` at its default, the same scenario
+  shipped all 650 pre-sync readings corrected, to 3 µs. See the time section in
   [`guarantees.md`](guarantees.md#time).
 
 ## Power cuts (`bench/pi/powercut.py`)
@@ -159,12 +197,18 @@ the run resumed with the harness waiting for each boot to finish and syncing fir
 
 Integrity was ok after all 16. The Pi booted back in 40–58 s every time.
 
+### `durability = "power"`, the setting itself, seed 21 (5 more cuts)
+
+The earlier runs set `synchronous=FULL` directly. This one went through the new
+`[buffer] durability = "power"` path. Cuts at 24, 84, 78, 60 and 30 s kept all 243, 848, 782,
+606 and 298 committed readings. Integrity ok 5/5.
+
 **`NORMAL` vs `FULL`, summed up:**
 
-| | `NORMAL` (10 cuts) | `FULL` (20 cuts) |
+| | `"process"` = `NORMAL` (10 cuts) | `"power"` = `FULL` (25 cuts) |
 |---|---|---|
 | Committed readings lost per cut | 44–352 (median 253) | **0** |
-| Cuts that lost anything | 10 / 10 | **0 / 20** |
+| Cuts that lost anything | 10 / 10 | **0 / 25** |
 | Integrity failures | 0 | 0 |
 | Commit latency, batch 50 (p50 / p99) | 3.8 / 66 ms | 13 / 115 ms |
 

@@ -140,6 +140,24 @@ def test_immediate_retries_default_zero_ok_negative_refused(tmp_path: Path) -> N
     assert "must not be negative" in e.problem
 
 
+def test_durability_defaults_to_power_and_takes_process(tmp_path: Path) -> None:
+    assert load(write(tmp_path, VALID)).durability == "power"
+    text = VALID.replace('path = "buf.db"\n', 'path = "buf.db"\ndurability = "process"\n')
+    assert load(write(tmp_path, text)).durability == "process"
+    text = VALID.replace('path = "buf.db"\n', 'path = "buf.db"\ndurability = "always"\n')
+    e = error_for(tmp_path, text)
+    assert e.line == line_of(text, "durability")
+    assert "'power', 'process'" in e.problem and 'durability = "power"' in e.fix
+
+
+def test_hold_unsynced_default_zero_ok_negative_refused(tmp_path: Path) -> None:
+    assert load(write(tmp_path, VALID)).shipper.hold_unsynced_s == 120.0
+    text = VALID + "\n[shipper]\nhold_unsynced_s = 0\n"
+    assert load(write(tmp_path, text)).shipper.hold_unsynced_s == 0.0
+    e = error_for(tmp_path, VALID + "\n[shipper]\nhold_unsynced_s = -5\n")
+    assert "must not be negative" in e.problem
+
+
 def test_backoff_bounds_must_be_ordered(tmp_path: Path) -> None:
     text = VALID + "\n[shipper]\nbackoff_initial_s = 5\nbackoff_max_s = 1\n"
     e = error_for(tmp_path, text)

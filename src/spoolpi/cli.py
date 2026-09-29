@@ -236,6 +236,8 @@ def _cmd_check(config: Config, _args: argparse.Namespace) -> int:
     print(
         f"buffer    {config.buffer_path} ({'directory writable' if writable else 'PROBLEM: directory missing or not writable'})"
     )
+    survives = "power cuts" if config.durability == "power" else "process crashes, not power cuts"
+    print(f"durability {config.durability}: commits survive {survives}")
     r = config.retention
     print(f"retention {r.policy}, cap {r.max_rows:,} unacked readings")
     if config.sink.mqtt is not None:
@@ -247,9 +249,9 @@ def _cmd_check(config: Config, _args: argparse.Namespace) -> int:
     print(f"device    {resolve_device_id(config)}")
     print(f"source    {config.source.type}")
     synced = clock.clock_synced()
-    print(
-        f"clock     {'synced' if synced else 'NOT synced (readings will be corrected once it is)'} via {clock.SYNC_BACKEND}"
-    )
+    hold = config.shipper.hold_unsynced_s
+    waiting = f"readings are held up to {hold:g} s for it" if hold else "readings ship uncorrected"
+    print(f"clock     {'synced' if synced else f'NOT synced ({waiting})'} via {clock.SYNC_BACKEND}")
     return EXIT_OK if ok else EXIT_PROBLEM
 
 

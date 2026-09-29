@@ -27,11 +27,12 @@ so a receiver removes them mechanically. Method and caveats:
   downstream is exact.
 - **Full buffer:** never silent. Discarded readings become gap records with exact counts, and
   the gap records ship like data.
-- **Clock:** readings taken before NTP sync are marked as such. Those still buffered when the
-  clock syncs are re-timestamped.
-- **Power cut:** the readings committed in about the last 30 s. On a Pi Zero 2 W, 10 simulated
-  power cuts lost 4–35 s of readings each, with no corruption. The design bound is ~1,000
-  records.
+- **Power cut:** the same as a crash, by default: at most the uncommitted batch. On a Pi Zero 2 W,
+  25 simulated power cuts lost no committed readings and never corrupted the buffer. The cheaper
+  `durability = "process"` loses about the last 30 s instead.
+- **Clock:** readings taken before NTP sync are marked as such. After a cold boot, SpoolPi holds
+  them (up to 120 s by default) until the clock syncs, then ships them re-timestamped. The
+  reference consumer corrects any that shipped unsynced once their boot's clock is known.
 
 The details, including the power-cut reasoning, are in
 [`docs/guarantees.md`](docs/guarantees.md).
@@ -136,7 +137,8 @@ python -m spoolpi.consumer --broker broker.example.org:1883 --init-schema
 
 It creates the tables in
 [`src/spoolpi/consumer/schema.sql`](src/spoolpi/consumer/schema.sql): `spoolpi_readings`, `spoolpi_gaps`
-and `spoolpi_dead_letters`, each keyed by `(buffer_id, seq)`. It stores each batch in one
+and `spoolpi_dead_letters`, each keyed by `(buffer_id, seq)`, plus `spoolpi_boot_clocks`, with
+one clock offset per device boot. It stores each batch in one
 transaction and acknowledges messages to the broker only after the commit, so a crash means
 redelivery, never loss, and the key turns redelivery into a no-op.
 
@@ -146,6 +148,9 @@ redelivery, never loss, and the key turns redelivery into a no-op.
   blocking the stream.
 - **Broker in-flight limit:** manual acknowledgement means the broker's limit caps the batch
   size. For mosquitto, raise `max_inflight_messages` (default 20) to around `--batch-size`.
+- **Late clock correction:** readings that shipped before the device's clock synced
+  (`ts_quality = 0`) are re-timestamped as soon as any trusted reading of the same boot arrives.
+  They get `ts_quality = 1`, and the device's original value is kept in `wall_ns_device`.
 - **Querying:** order a device's readings by `seq`, not by time, and treat `ts` as trustworthy
   only where `ts_quality > 0`.
 

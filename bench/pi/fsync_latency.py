@@ -57,8 +57,7 @@ def raw_fsync(directory: Path) -> list[float]:
 def commits(directory: Path, batch: int, synchronous: str) -> list[float]:
     db = directory / f"buffer-{batch}-{synchronous}.db"
     out = []
-    with Buffer(db) as buf:
-        buf._conn.execute(f"PRAGMA synchronous = {synchronous}")
+    with Buffer(db, durability="power" if synchronous == "FULL" else "process") as buf:
         n = 0
         for _ in range(COMMITS):
             readings = [

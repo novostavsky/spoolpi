@@ -2,6 +2,9 @@
 
 [buffer]
 path = "/var/lib/spoolpi/buffer.db"
+# "power" (default): every commit is fsynced, so committed readings survive a power cut.
+# "process": cheaper commits for high write rates; a power cut loses about the last 30 s.
+durability = "power"
 
 [retention]
 # Required, no default: what happens when the buffer holds max_rows unshipped readings.
@@ -20,6 +23,7 @@ batch_size = 100
 send_timeout_s = 10
 stop_timeout_s = 10  # keep below systemd's TimeoutStopSec
 immediate_retries = 2  # retry the first failures at once, then back off (0.5 s up to 60 s)
+hold_unsynced_s = 120  # after a cold boot, wait up to this long for NTP so timestamps get corrected
 
 [sink]
 type = "jsonl"

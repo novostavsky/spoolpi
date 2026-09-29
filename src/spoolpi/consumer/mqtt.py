@@ -134,7 +134,7 @@ class MqttConsumer:
                 if stop.wait(delay):
                     return conn
                 delay = min(delay * 2, 30.0)
-        for field in ("readings", "gaps", "duplicates", "dead_letters"):
+        for field in ("readings", "gaps", "duplicates", "dead_letters", "corrected"):
             setattr(self.totals, field, getattr(self.totals, field) + getattr(result, field))
         if result.dead_letters:
             log.warning(

@@ -68,11 +68,13 @@ def main(argv: list[str] | None = None) -> int:
     consumer.run(stop)
     t = consumer.totals
     logging.getLogger("spoolpi.consumer").info(
-        "stopped: %d readings, %d gaps stored; %d duplicates ignored; %d dead letters",
+        "stopped: %d readings, %d gaps stored; %d duplicates ignored; %d dead letters; "
+        "%d unsynced timestamps corrected",
         t.readings,
         t.gaps,
         t.duplicates,
         t.dead_letters,
+        t.corrected,
     )
     return 0
 

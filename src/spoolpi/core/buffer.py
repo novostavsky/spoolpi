@@ -4,9 +4,14 @@ Rows move ``pending -> inflight -> acked``. Delivery is at-least-once by design:
 rows a shipper claimed but never acked (because the process died between send
 and ack) go back to pending via ``recover_inflight()`` and are sent again.
 
-Durability: with ``synchronous=NORMAL`` every commit survives a process crash
-(SIGKILL); on power loss the most recent commits may roll back, but the file
-is never corrupted.
+Durability (``durability=``):
+- ``"power"`` (the default) runs SQLite with ``synchronous=FULL``: every commit is
+  fsynced before it returns, so it survives a power cut too.
+- ``"process"`` runs it with ``synchronous=NORMAL``: every commit survives a process
+  crash (SIGKILL), but a power cut can roll back the commits of roughly the last
+  30 s. It's cheaper per commit, for high write rates.
+
+Either way, the file is never corrupted.
 
 Retention: with a cap, readings discarded to respect it are recorded as gap
 records in the same transaction that discards them, so the counts are exact.
@@ -25,7 +30,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Final, Self
+from typing import Any, Final, Literal, Self, get_args
 
 from spoolpi.core.identity import SeqAllocator, init_meta, read_buffer_id
 from spoolpi.core.reading import Reading
@@ -50,6 +55,12 @@ REJECTED: Final = 3  # refused for good by the sink: never resent, kept for insp
 # Quarantined rows kept for inspection; older ones are trimmed (they're already
 # counted in gap records). Bounds disk if a sink wrongly rejects a lot.
 QUARANTINE_KEEP: Final = 10_000
+
+Durability = Literal["power", "process"]
+DURABILITIES: Final[tuple[str, ...]] = get_args(Durability)
+# Measured on a Pi Zero 2 W (docs/hardware.md): FULL lost 0 committed readings in
+# 20 power cuts, NORMAL lost the last 4-35 s every time.
+_SYNCHRONOUS: Final[dict[str, str]] = {"power": "FULL", "process": "NORMAL"}
 _IN_CHUNK: Final = 500  # ids per `IN (...)` query, well under SQLite's parameter limit
 
 SCHEMA_VERSION: Final = 3
@@ -169,7 +180,9 @@ def _enable_wal(conn: sqlite3.Connection, timeout_s: float = 5.0) -> str:
             time.sleep(0.01)
 
 
-def _connect(path: Path, wal_autocheckpoint: int) -> sqlite3.Connection:
+def _connect(path: Path, wal_autocheckpoint: int, durability: Durability) -> sqlite3.Connection:
+    if durability not in _SYNCHRONOUS:
+        raise ValueError(f"durability must be one of {DURABILITIES}, got {durability!r}")
     # isolation_level=None: we issue BEGIN IMMEDIATE / COMMIT ourselves.
     conn = sqlite3.connect(path, isolation_level=None, timeout=5.0)
     mode = _enable_wal(conn)
@@ -179,7 +192,7 @@ def _connect(path: Path, wal_autocheckpoint: int) -> sqlite3.Connection:
             f"{path}: could not enable WAL mode (got {mode!r}); "
             "the buffer must live on a local filesystem"
         )
-    conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute(f"PRAGMA synchronous = {_SYNCHRONOUS[durability]}")
     conn.execute(f"PRAGMA wal_autocheckpoint = {int(wal_autocheckpoint)}")
     conn.execute("PRAGMA busy_timeout = 5000")
     return conn
@@ -216,7 +229,8 @@ class Buffer:
 
     The underlying sqlite3 connection raises ``ProgrammingError`` if touched from
     a thread other than the one that created it. ``retention`` only matters on
-    the handle that writes; without it the buffer is unbounded.
+    the handle that writes; without it the buffer is unbounded. ``durability`` is
+    per handle: give the writer's and the shipper's the same.
     """
 
     def __init__(
@@ -226,10 +240,11 @@ class Buffer:
         retention: Retention | None = None,
         wal_autocheckpoint: int = 1000,
         seq_block_size: int = 1000,
+        durability: Durability = "power",
     ) -> None:
         self.path = Path(path)
         is_new = not self.path.exists()
-        self._conn = _connect(self.path, wal_autocheckpoint)
+        self._conn = _connect(self.path, wal_autocheckpoint, durability)
         with self._write() as c:
             version = c.execute("PRAGMA user_version").fetchone()[0]
             if version not in (0, SCHEMA_VERSION):

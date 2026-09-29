@@ -3,8 +3,9 @@
 ## 0.1.0 (unreleased)
 
 First release. It works end to end on a device, from the sensor to Postgres, and is tested
-against real SIGKILLs, a real MQTT broker and a real database. It hasn't yet been measured on
-Raspberry Pi hardware: SD-card fsync latency, power cuts, memory use.
+against real SIGKILLs, a real MQTT broker and a real database. It's measured on a Raspberry Pi
+Zero 2 W: SD-card commit latency, simulated power cuts, memory (< 30 MB), and a real NTP step.
+See `docs/hardware.md`.
 
 ### Buffer and delivery
 - SQLite WAL buffer. A SIGKILL loses at most the uncommitted batch (default 50 readings or 1 s),
@@ -18,9 +19,14 @@ Raspberry Pi hardware: SD-card fsync latency, power cuts, memory use.
   gap records that ship like data.
 - Poison records: a sink can reject records for good. They're quarantined and reported as gaps,
   and a sink rejecting everything is treated as an outage, not as poison.
+- `[buffer] durability`: `"power"` (the default) fsyncs every commit, so committed readings
+  survive power cuts (0 lost in 25 cuts on a Pi). `"process"` is cheaper for high write rates,
+  and a power cut loses about the last 30 s.
 - Clock handling: `CLOCK_BOOTTIME` + boot id + wall clock on every reading. NTP sync is detected
   via `adjtimex` (with a `timedatectl` fallback), and pre-sync readings are corrected at ship
   time.
+- `[shipper] hold_unsynced_s` (default 120 s): after a cold boot, readings wait for NTP, so they
+  ship corrected rather than with a stale clock.
 
 ### Sinks
 - `mqtt` (`spoolpi[mqtt]`): QoS 1, acked on PUBACK, MQTT 5 per-record rejections, TLS,
@@ -33,10 +39,12 @@ Raspberry Pi hardware: SD-card fsync latency, power cuts, memory use.
 - `spoolpi run | check | status`, TOML config with file:line:fix errors, `spoolpi --version`.
 - A systemd unit that survives `systemctl restart` without loss.
 - Reference consumer `python -m spoolpi.consumer` (`spoolpi[consumer]`): MQTT → Postgres, exactly
-  once via `UNIQUE (buffer_id, seq)`, with a dead-letter table.
+  once via `UNIQUE (buffer_id, seq)`, with a dead-letter table. It corrects readings that shipped
+  before the device's clock synced, using each boot's clock offset (`spoolpi_boot_clocks`), and
+  keeps the device's original timestamp.
 
 ### Known limitations
-- The power-cut loss bound (~1,000 records) is reasoned, not measured.
+- Power cuts are measured with simulated cuts (sysrq resets); real plug pulls are still to do.
 - No schema migrations: an upgrade that changes the buffer schema needs an empty buffer.
 - Quarantined records can't be re-sent.
 - One writer process per buffer.

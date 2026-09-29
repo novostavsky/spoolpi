@@ -55,11 +55,12 @@ wrong.
 
 ### Power cuts
 
-A power cut loses the readings committed in roughly the last 30 seconds (measured on a Pi Zero 2 W:
-4–35 s, [`guarantees.md`](guarantees.md#power-cuts)). The buffer itself stays intact. If your
-device loses power often, size your expectations to that. Where possible, give it a clean
-shutdown path (a UPS HAT, or a supercapacitor with a shutdown signal), because
-`systemctl stop` loses nothing.
+With the default `[buffer] durability = "power"`, a power cut loses only the readings not yet
+committed: at most one batch, 1 s by default. On a Pi Zero 2 W, 25 simulated power cuts lost no
+committed readings ([`guarantees.md`](guarantees.md#power-cuts)). With `durability = "process"`,
+a cut loses the readings committed in roughly the last 30 s (4–35 s measured). Either way the
+buffer stays intact. A clean shutdown path (a UPS HAT, or a supercapacitor with a shutdown
+signal) avoids even the one batch, because `systemctl stop` loses nothing.
 
 **The operating system is more fragile than the buffer.** In testing on Raspberry Pi OS trixie, a
 power cut shortly after boot left the Pi permanently without Wi-Fi. NetworkManager rewrites its
@@ -98,12 +99,17 @@ then stops) but never joins the network, and power cycles don't help.
 
 SpoolPi doesn't need the clock to be right. It needs to know *whether* it's right. Keep
 `systemd-timesyncd` (or chrony) enabled. Readings taken before the first sync are corrected
-after it (`ts_quality = 1`), provided they're still buffered when the clock syncs and the
-device hasn't rebooted in between. If the uplink is up before NTP syncs, pre-sync readings ship
-at once as `ts_quality = 0`. A Pi without an RTC does this on every boot. The receiver can
-correct them from `mono_ns` and `boot_id` ([`guarantees.md`](guarantees.md#time)). `spoolpi check`
-shows whether the clock is synced, and how SpoolPi knows (`adjtimex`, or the slower `timedatectl`
-fallback).
+when they ship (`ts_quality = 1`), provided the clock has synced by then and the device hasn't
+rebooted in between.
+
+A Pi without an RTC starts every boot unsynced. So when SpoolPi starts with the clock unsynced,
+it holds readings back for up to `[shipper] hold_unsynced_s` (120 s by default) and ships them
+as soon as the clock syncs. If the clock doesn't sync in time, they ship as `ts_quality = 0`.
+The reference consumer then still corrects them, once any trusted reading of the same boot
+arrives ([`guarantees.md`](guarantees.md#time)).
+
+`spoolpi check` shows whether the clock is synced, how SpoolPi knows (`adjtimex`, or the slower
+`timedatectl` fallback), and what happens to readings while it isn't.
 
 ## Sizing the buffer
 
@@ -153,6 +159,9 @@ suppressed for 60 seconds.
 | `sink rejected all N records of a batch; treating it as a failed send` | the receiver refuses everything, which looks systemic (schema, auth, wrong endpoint), so nothing is dropped | fix the receiver; delivery resumes on its own |
 | `N hung sends still running; not sending more` | the sink hangs past `send_timeout_s` repeatedly | check the sink |
 | `adjtimex unusable on this system, falling back to timedatectl` | the kernel interface didn't pass its checks | harmless; sync checks just become slower |
+| `clock not synchronised; holding readings for up to N s so their timestamps can be corrected` | started before NTP synced (every boot of an RTC-less Pi) | nothing; normal after a cold boot |
+| `clock synchronised; shipping held readings with corrected timestamps` | NTP synced during the hold | nothing |
+| `clock still not synchronised after N s; shipping readings with uncorrected timestamps (ts_quality 0)` | no NTP sync within `hold_unsynced_s` | check `timedatectl`, network and NTP reachability; the consumer corrects them later if the clock syncs in this boot |
 | `shipper iteration failed` (with a traceback) | an unexpected error; the shipper retries | please report it |
 
 ### Quarantine

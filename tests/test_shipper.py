@@ -5,6 +5,7 @@ import sqlite3
 import time
 from collections.abc import Iterator, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -12,6 +13,7 @@ from spoolpi.core import shipper as shipper_mod
 from spoolpi.core.buffer import ACKED, INFLIGHT, PENDING, REJECTED, BatchWriter, Buffer
 from spoolpi.core.clock import ClockAnchor
 from spoolpi.core.reading import TS_CORRECTED, Reading
+from spoolpi.core.retention import GapRecord, Policy, Retention
 from spoolpi.core.shipper import Backoff, Shipper
 from spoolpi.sinks.base import AckSet, Envelope
 from spoolpi.sinks.memory import Hang, MemorySink, Partial, Raise, Reject
@@ -235,11 +237,11 @@ def test_a_failed_buffer_open_is_retried_not_fatal(
     real = shipper_mod.Buffer
     calls = {"n": 0}
 
-    def flaky_open(path: Path) -> Buffer:
+    def flaky_open(path: Path, **kwargs: Any) -> Buffer:
         calls["n"] += 1
         if calls["n"] == 1:
             raise sqlite3.OperationalError("database is locked")
-        return real(path)
+        return real(path, **kwargs)
 
     monkeypatch.setattr(shipper_mod, "Buffer", flaky_open)
     sink = MemorySink()
@@ -285,3 +287,78 @@ def test_unsynced_readings_are_corrected_at_ship_time(db: Path, running: list[Sh
         assert isinstance(e.payload, Reading)
         assert e.payload.ts_quality == TS_CORRECTED
         assert e.payload.wall_ns == e.payload.mono_ns + offset
+
+
+# --- holding unsynced readings -------------------------------------------------
+
+
+def _unsynced(db: Path, n: int) -> tuple[FakeClock, ClockAnchor]:
+    clock = FakeClock()
+    anchor = ClockAnchor(clock)
+    anchor.poll()  # not synced: no anchor yet
+    with Buffer(db) as b:
+        b.append([reading(i, boot_id=clock.boot_id) for i in range(n)])
+    return clock, anchor
+
+
+def test_hold_waits_for_sync_then_ships_corrected(db: Path, running: list[Shipper]) -> None:
+    clock, anchor = _unsynced(db, 30)
+    sink = MemorySink()
+    ship(db, sink, running, anchor=anchor, hold_unsynced_s=30)
+    time.sleep(0.3)
+    assert sink.received == []  # held: shipping now would send them uncorrected
+    offset = 1_790_000_000 * NS_PER_S
+    clock.ntp_step(offset)
+    anchor.poll()
+    drain(db)
+    assert steps(sink) == list(range(30))
+    for e in sink.received:
+        assert isinstance(e.payload, Reading)
+        assert e.payload.ts_quality == TS_CORRECTED
+        assert e.payload.wall_ns == e.payload.mono_ns + offset
+
+
+def test_hold_runs_out_and_ships_uncorrected(db: Path, running: list[Shipper]) -> None:
+    _, anchor = _unsynced(db, 10)
+    sink = MemorySink()
+    started = time.monotonic()
+    ship(db, sink, running, anchor=anchor, hold_unsynced_s=0.3)
+    drain(db)
+    assert time.monotonic() - started >= 0.3
+    assert steps(sink) == list(range(10))
+    assert all(isinstance(e.payload, Reading) and e.payload.ts_quality == 0 for e in sink.received)
+
+
+def test_no_hold_when_the_clock_is_already_synced(db: Path, running: list[Shipper]) -> None:
+    clock = FakeClock(synced=True)
+    anchor = ClockAnchor(clock)
+    anchor.poll()
+    fill(db, 10)
+    sink = MemorySink()
+    started = time.monotonic()
+    ship(db, sink, running, anchor=anchor, hold_unsynced_s=30)
+    drain(db)
+    assert time.monotonic() - started < 5
+
+
+def test_hold_zero_ships_at_once(db: Path, running: list[Shipper]) -> None:
+    _, anchor = _unsynced(db, 10)
+    sink = MemorySink()
+    started = time.monotonic()
+    ship(db, sink, running, anchor=anchor, hold_unsynced_s=0)
+    drain(db)
+    assert time.monotonic() - started < 5
+    assert steps(sink) == list(range(10))
+
+
+def test_gap_records_ship_during_the_hold(db: Path, running: list[Shipper]) -> None:
+    clock = FakeClock()
+    anchor = ClockAnchor(clock)
+    anchor.poll()
+    with Buffer(db, retention=Retention(Policy.DROP_OLDEST, 5)) as b:
+        b.append([reading(i, boot_id=clock.boot_id) for i in range(8)])  # drops 3 into a gap
+    sink = MemorySink()
+    ship(db, sink, running, anchor=anchor, hold_unsynced_s=30)
+    wait_for(lambda: any(isinstance(e.payload, GapRecord) for e in sink.received))
+    time.sleep(0.2)
+    assert all(isinstance(e.payload, GapRecord) for e in sink.received)  # readings still held

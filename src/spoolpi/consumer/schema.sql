@@ -4,9 +4,12 @@
 -- (buffer_id, seq) and inserted with ON CONFLICT DO NOTHING: a resend is a no-op.
 --
 -- Time: wall_ns is what the device's clock said, corrected after NTP sync when
--- possible. Trust it (and `ts`) only where ts_quality > 0; ts_quality = 0 rows
--- were sampled before the clock synced and may say 1970. Order a device's
--- records by (buffer_id, seq), not by time: clocks step, seq doesn't.
+-- possible. ts_quality = 0 rows were sampled before the clock synced and shipped
+-- uncorrected. The consumer corrects them here once any trusted reading of the same boot
+-- arrives: it keeps the boot's clock offset in spoolpi_boot_clocks, sets
+-- wall_ns = mono_ns + offset and ts_quality = 1, and keeps the device's value in
+-- wall_ns_device. Trust wall_ns (and `ts`) only where ts_quality > 0. Order a
+-- device's records by (buffer_id, seq), not by time: clocks step, seq doesn't.
 
 CREATE TABLE IF NOT EXISTS spoolpi_readings (
     buffer_id   uuid             NOT NULL,
@@ -26,8 +29,25 @@ CREATE TABLE IF NOT EXISTS spoolpi_readings (
     PRIMARY KEY (buffer_id, seq)
 );
 
+-- The device's own wall_ns, kept when the consumer corrected the row; NULL otherwise.
+ALTER TABLE spoolpi_readings ADD COLUMN IF NOT EXISTS wall_ns_device bigint;
+
 CREATE INDEX IF NOT EXISTS spoolpi_readings_by_sensor_time
     ON spoolpi_readings (device_id, sensor_id, ts);
+
+-- Uncorrected rows waiting for their boot's offset; small, and empty in steady state.
+CREATE INDEX IF NOT EXISTS spoolpi_readings_unsynced
+    ON spoolpi_readings (boot_id) WHERE ts_quality = 0;
+
+-- One row per device boot: wall_ns - mono_ns, taken from the earliest trusted
+-- (ts_quality > 0) reading of that boot. It converts any mono_ns of the boot to wall
+-- time, including a gap's from_mono_ns / to_mono_ns.
+CREATE TABLE IF NOT EXISTS spoolpi_boot_clocks (
+    boot_id    text        PRIMARY KEY,
+    offset_ns  bigint      NOT NULL,
+    mono_ns    bigint      NOT NULL,     -- mono_ns of the reading the offset came from
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
 
 -- Readings a device discarded or a sink refused: `count` is exact, and every one
 -- of them was sampled within [from_mono_ns, to_mono_ns] of boot_id.

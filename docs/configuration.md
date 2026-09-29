@@ -25,6 +25,22 @@ required key) are required. Everything else has a default.
 |---|---|---|
 | `path` | *required* | The SQLite buffer file. Its directory must exist and be writable. Keep it on local storage: WAL mode doesn't work on network filesystems. |
 | `wal_autocheckpoint` | `1000` | Pages of write-ahead log before SQLite checkpoints it into the main file (1,000 pages ≈ 4 MB). |
+| `durability` | `"power"` | `"power"`: every commit is fsynced before it returns (SQLite `synchronous=FULL`), so committed readings survive a power cut. `"process"`: commits survive a process crash, but a power cut loses roughly the last 30 s of them (`synchronous=NORMAL`). |
+
+**Choosing `durability`.** Measured on a Pi Zero 2 W with an SD card
+([`hardware.md`](hardware.md#power-cuts-benchpipowercutpy)):
+
+| | `"power"` (default) | `"process"` |
+|---|---|---|
+| Committed readings lost per power cut | 0 (25 cuts) | the last 4–35 s (10 cuts) |
+| Commit of a 50-reading batch, p50 / p99 | 13 / 115 ms | 3.8 / 66 ms |
+| Commit capacity | ~3,800 readings/s | ~13,000 readings/s |
+
+At typical sensor rates (10 readings/s is one commit per second), `"power"` costs ~1% of I/O
+time. Its costs: `write()` occasionally takes ~100 ms when it commits, and each commit is a
+write to the card. Use `"process"` for high write rates, or where power cuts can't happen (a
+UPS with clean shutdown). Either way, a process crash loses at most the uncommitted batch, and
+the file is never corrupted.
 
 Deleting the buffer file starts a new buffer with a new `buffer_id`. That's safe for
 deduplication downstream, but whatever wasn't shipped is gone.
@@ -53,7 +69,9 @@ loses at most the uncommitted batch.
 | `max_rows` | `50` | Commit once the batch holds this many readings. |
 | `max_delay_s` | `1.0` | Commit once this long has passed since the last commit. A sparse writer therefore commits every reading immediately. |
 
-These defaults are provisional until SD-card fsync latency has been measured on a Pi.
+On a Pi Zero 2 W's SD card, a default commit takes ~4 ms (`durability = "process"`) or ~13 ms
+(`"power"`), far below the one-commit-per-second of a typical sensor load
+([`hardware.md`](hardware.md)).
 
 ## [shipper]
 
@@ -67,6 +85,17 @@ These defaults are provisional until SD-card fsync latency has been measured on 
 | `backoff_initial_s` | `0.5` | First backoff delay after the immediate retries; it doubles on each failure. |
 | `backoff_max_s` | `60` | Longest backoff delay. Must be ≥ `backoff_initial_s`. |
 | `stop_timeout_s` | `10` | On SIGTERM, how long the shipper gets to finish the batch in flight. Keep it below systemd's `TimeoutStopSec`. |
+| `hold_unsynced_s` | `120` | If the clock isn't synced when SpoolPi starts, hold readings back for up to this long, so they ship with corrected timestamps (`ts_quality = 1`) rather than whatever the clock said (`ts_quality = 0`). Gap records still ship. `0` ships at once. |
+
+**About `hold_unsynced_s`.** A Pi has no RTC: it boots with a stale clock and steps it when NTP
+syncs. Readings are corrected when they ship. So with the uplink up before NTP, every pre-sync
+reading used to ship with the wrong time; on the Pi test, 640 of 650 were 30 days off
+([`hardware.md`](hardware.md#clock-without-an-rtc-benchpiclock_coldbootpy)).
+- **Where the clock is already synced at start,** nothing is held.
+- **Once it syncs,** the held readings ship straight away, corrected.
+- **If it never syncs within the hold** (no NTP, no network), they ship uncorrected, as before,
+  and the log says so.
+- **The cost:** after a cold boot, delivery starts up to `hold_unsynced_s` later.
 
 ## [sink]
 

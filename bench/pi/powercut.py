@@ -11,7 +11,8 @@ lost = last step the Pi reported committed - last step found in the buffer.
 Needs on the Pi: the repo deployed (bench/pi/deploy.sh) and passwordless
 `sudo tee /proc/sysrq-trigger`.
 
-Usage: python bench/pi/powercut.py <cycles> <NORMAL|FULL> [host] [seed]
+Usage: python bench/pi/powercut.py <cycles> <power|process> [host] [seed]
+       (NORMAL / FULL, the SQLite modes behind them, are accepted too)
 """
 
 from __future__ import annotations

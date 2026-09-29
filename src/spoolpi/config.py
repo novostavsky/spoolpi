@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from spoolpi.core.buffer import DURABILITIES, Durability
 from spoolpi.core.retention import Policy, Retention
 
 SINK_TYPES: Final = ("jsonl", "mqtt", "http")
@@ -23,6 +24,9 @@ PLANNED_SINKS: Final[tuple[str, ...]] = ()
 SOURCE_TYPES: Final = ("stdin", "fake")
 TOPIC_FIELDS: Final = ("device_id", "buffer_id", "type", "sensor_id")
 IMMEDIATE_RETRIES_DEFAULT: Final = 2  # see bench/retry_policy.py for the measurement
+# Long enough for timesyncd on a Pi without an RTC to sync after boot (seconds on a LAN),
+# short enough that a device without NTP ships reasonably soon anyway.
+HOLD_UNSYNCED_DEFAULT_S: Final = 120.0
 
 # Which [sink] keys each sink type takes; the first ones listed are required.
 _SINK_KEYS: Final[dict[str, tuple[tuple[str, ...], tuple[str, ...]]]] = {
@@ -67,6 +71,7 @@ class ShipperConfig:
     backoff_max_s: float
     stop_timeout_s: float
     immediate_retries: int
+    hold_unsynced_s: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +120,7 @@ class Config:
     file: Path
     buffer_path: Path
     wal_autocheckpoint: int
+    durability: Durability
     retention: Retention
     batch_max_rows: int
     batch_max_delay_s: float
@@ -188,6 +194,12 @@ _SCHEMA: Final[dict[str, dict[str, _Key]]] = {
     "buffer": {
         "path": _Key(str, example='path = "/var/lib/spoolpi/buffer.db"'),
         "wal_autocheckpoint": _Key(int, 1000, _positive, "wal_autocheckpoint = 1000"),
+        "durability": _Key(
+            str,
+            "power",
+            _one_of(DURABILITIES),
+            'durability = "power"   # or "process" for high write rates',
+        ),
     },
     "retention": {
         "policy": _Key(
@@ -212,6 +224,12 @@ _SCHEMA: Final[dict[str, dict[str, _Key]]] = {
             int, IMMEDIATE_RETRIES_DEFAULT, _non_negative, "immediate_retries = 2"
         ),
         "stop_timeout_s": _Key(_NUMBER, 10.0, _positive, "stop_timeout_s = 10"),
+        "hold_unsynced_s": _Key(
+            _NUMBER,
+            HOLD_UNSYNCED_DEFAULT_S,
+            _non_negative,
+            "hold_unsynced_s = 120   # 0 ships at once",
+        ),
     },
     "sink": {
         "type": _Key(str, check=_sink_type, example='type = "mqtt"   # or "jsonl"'),
@@ -435,6 +453,7 @@ def load(file: str | Path) -> Config:
         file=path,
         buffer_path=base / s["buffer"]["path"],
         wal_autocheckpoint=s["buffer"]["wal_autocheckpoint"],
+        durability=s["buffer"]["durability"],
         retention=Retention(Policy(s["retention"]["policy"]), s["retention"]["max_rows"]),
         batch_max_rows=s["batch"]["max_rows"],
         batch_max_delay_s=float(s["batch"]["max_delay_s"]),
@@ -447,6 +466,7 @@ def load(file: str | Path) -> Config:
             backoff_max_s=float(shipper["backoff_max_s"]),
             stop_timeout_s=float(shipper["stop_timeout_s"]),
             immediate_retries=shipper["immediate_retries"],
+            hold_unsynced_s=float(shipper["hold_unsynced_s"]),
         ),
         sink=SinkConfig(sink["type"], rel(sink["path"]), mqtt, http),
         source=SourceConfig(

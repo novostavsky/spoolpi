@@ -86,6 +86,89 @@ def test_store_inserts_once_and_ignores_resends(dsn: str) -> None:
     assert (count, int(year), quality, tests) == (6, 2026, TS_CORRECTED, "{}")
 
 
+# --- correcting readings shipped before the device's clock synced ------------------------
+
+
+def unsynced(n: int, **overrides: Any) -> Incoming:
+    # Sampled before sync: the device's wall clock said 1970 + a bit.
+    return message(n, ts_quality=0, wall_ns=n, **overrides)
+
+
+def test_unsynced_readings_are_corrected_when_a_trusted_one_arrives_later(dsn: str) -> None:
+    with psycopg.connect(dsn) as conn:
+        first = store(conn, [unsynced(i) for i in range(5)])
+        assert first.corrected == 0  # no trusted reading of that boot yet
+        second = store(conn, [message(10)])  # mono 10, wall WALL + 10: offset WALL
+    assert second.corrected == 5
+    got = rows(
+        dsn,
+        "SELECT seq, wall_ns, ts_quality, wall_ns_device, extract(year FROM ts)::int "
+        "FROM spoolpi_readings WHERE seq < 5 ORDER BY seq",
+    )
+    assert got == [(i, WALL + i, 1, i, 2026) for i in range(5)]
+
+
+def test_unsynced_readings_arriving_after_the_offset_are_corrected_on_arrival(dsn: str) -> None:
+    with psycopg.connect(dsn) as conn:
+        store(conn, [message(10)])
+        result = store(conn, [unsynced(i) for i in range(3)])
+    assert result.corrected == 3
+    assert rows(dsn, "SELECT count(*) FROM spoolpi_readings WHERE ts_quality = 0") == [(0,)]
+
+
+def test_unsynced_and_trusted_in_one_batch(dsn: str) -> None:
+    with psycopg.connect(dsn) as conn:
+        result = store(conn, [unsynced(0), unsynced(1), message(2)])
+    assert result.corrected == 2
+    assert rows(dsn, "SELECT wall_ns FROM spoolpi_readings ORDER BY seq") == [
+        (WALL,),
+        (WALL + 1,),
+        (WALL + 2,),
+    ]
+
+
+def test_other_boots_are_not_touched(dsn: str) -> None:
+    with psycopg.connect(dsn) as conn:
+        store(conn, [unsynced(0, boot_id="other-boot"), message(1)])
+    assert rows(dsn, "SELECT ts_quality, wall_ns_device FROM spoolpi_readings WHERE seq = 0") == [
+        (0, None)
+    ]
+
+
+def test_the_earliest_trusted_reading_sets_the_offset(dsn: str) -> None:
+    with psycopg.connect(dsn) as conn:
+        store(conn, [message(50, wall_ns=WALL + 50 + 7)])  # offset WALL + 7
+        store(conn, [message(10)])  # earlier in the boot: offset WALL, replaces it
+        store(conn, [message(90, wall_ns=WALL + 90 + 3)])  # later: kept out
+    assert rows(dsn, "SELECT boot_id, offset_ns, mono_ns FROM spoolpi_boot_clocks") == [
+        ("boot", WALL, 10)
+    ]
+
+
+def test_an_absurd_timestamp_is_not_used_and_does_not_wedge_the_batch(dsn: str) -> None:
+    with psycopg.connect(dsn) as conn:
+        result = store(conn, [unsynced(0), message(1, wall_ns=2**63 - 1)])
+    assert (result.readings, result.corrected) == (2, 0)
+    assert rows(dsn, "SELECT count(*) FROM spoolpi_boot_clocks") == [(0,)]
+
+
+def test_gap_times_convert_through_the_boot_offset(dsn: str) -> None:
+    # The query docs/guarantees.md gives for a gap's wall time.
+    gap = GapRecord("t1", "boot", 3, 8, "backpressure", 4)
+    gap_msg = Incoming(
+        "spoolpi/dev1/gap/t1",
+        json.dumps({"device_id": "dev1"} | to_wire(Envelope(BUF, 100, gap))).encode(),
+    )
+    with psycopg.connect(dsn) as conn:
+        store(conn, [gap_msg, message(10)])
+    [(start, end)] = rows(
+        dsn,
+        "SELECT g.from_mono_ns + c.offset_ns, g.to_mono_ns + c.offset_ns "
+        "FROM spoolpi_gaps g JOIN spoolpi_boot_clocks c USING (boot_id)",
+    )
+    assert (start, end) == (WALL + 3, WALL + 8)
+
+
 def test_failed_reads_and_gaps_are_stored(dsn: str) -> None:
     gap = GapRecord(None, "boot", 1, 9, "backpressure", 4)
     gap_msg = Incoming(
