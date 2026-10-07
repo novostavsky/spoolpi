@@ -1,4 +1,4 @@
-"""Week 0 naive spike -- the implementation everyone writes first.
+"""The naive spike -- the implementation everyone writes first.
 
 Reads a fake sensor in a loop, appends to SQLite with default pragmas, and
 posts each reading to a local HTTP endpoint immediately -- before the row is

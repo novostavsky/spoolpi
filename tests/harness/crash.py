@@ -2,7 +2,7 @@
 
 Runs a target command as a subprocess, lets it run for a given duration,
 then SIGKILLs it -- no clean shutdown -- and reports what happened. Used to
-drive both the Week 0 naive-spike measurement and the later M0 buffer crash
+drive both the naive-spike measurement and the later buffer crash
 tests against the same mechanism.
 """
 

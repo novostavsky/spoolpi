@@ -87,7 +87,7 @@ times out and the sink stored the data anyway.
   records under `UNIQUE (buffer_id, seq)` deduplicates exactly.
 - A reading is **never** sent under two different keys. That's the kind of duplicate no
   receiver could detect.
-- In the Week 0 rerun (`docs/motivation.md`), 0.23% of records were re-sent across 300 kills,
+- In the spike rerun (`docs/motivation.md`), 0.23% of records were re-sent across 300 kills,
   and **0** duplicates remained after deduplicating by key.
 
 Keys are unique per buffer file:

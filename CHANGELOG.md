@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (beta)
 
 First release. It works end to end on a device, from the sensor to Postgres, and is tested
 against real SIGKILLs, a real MQTT broker and a real database. It's measured on a Raspberry Pi

@@ -1,4 +1,4 @@
-"""Week 0 rerun: drive bench/spoolpi_spike.py through SIGKILL cycles, like the naive spike.
+"""The spike rerun: drive bench/spoolpi_spike.py through SIGKILL cycles, like the naive spike.
 
 Same kill schedule as run_naive_spike_crash_test.py (uniform 0.05-1.5 s, seeded),
 the same buffer persisting across all cycles, and an HTTP receiver that stays up

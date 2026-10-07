@@ -1,4 +1,4 @@
-"""Week 0 rerun: the naive spike's fake-sensor loop, through SpoolPi instead.
+"""The spike rerun: the naive spike's fake-sensor loop, through SpoolPi instead.
 
 Same cadence as naive_spike.py (one reading every 10 ms), and the same resume
 rule: after a restart, continue from the last *committed* step + 1. Ships over

@@ -1,6 +1,6 @@
 # Motivation: measuring the naive approach
 
-The Week 0 spike: the experiment that came before the design. Environment: Debian 13 (trixie) under
+The spike: the experiment that came before the design. Environment: Debian 13 (trixie) under
 WSL2, native ext4 filesystem, Python 3.13.5, SQLite bundled with CPython.
 
 ## The naive implementation
@@ -73,7 +73,7 @@ The same experiment, with SpoolPi in place of the naive loop:
 | **Total** | **18,318** | **2,109 (11.5%)** | **20,273** | **47 (0.23%)** | **0** |
 
 Neither design lost a committed reading or corrupted its database in any run. (The first
-Week 0 run above measured 13.1% for the naive spike; today's three seeds put it at 10.9–12.7%.)
+run above measured 13.1% for the naive spike; today's three seeds put it at 10.9–12.7%.)
 
 The difference is in what reaches the receiver:
 
