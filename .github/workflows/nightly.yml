@@ -19,8 +19,8 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Integration test dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y mosquitto postgresql
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y mosquitto postgresql
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: bash ci/run.sh nightly
       - name: Upload CI logs
