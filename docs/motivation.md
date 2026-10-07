@@ -1,6 +1,6 @@
 # Motivation: measuring the naive approach
 
-Week 0 spike, per `spool_implementation-plan.md` §1. Environment: Debian 13 (trixie) under
+The Week 0 spike: the experiment that came before the design. Environment: Debian 13 (trixie) under
 WSL2, native ext4 filesystem, Python 3.13.5, SQLite bundled with CPython.
 
 ## The naive implementation
@@ -51,7 +51,7 @@ audits the numbers months later.
 This is the core problem statement: storage durability and delivery state are two different
 facts, and treating either one as a proxy for the other produces a real, silent, high-rate
 defect. That's the number the rest of the project is measured against — the identity/shipper
-design (M3/M5) exists specifically to make "committed" and "delivered" two explicitly tracked
+design (the sequence-number identity and the shipper) exists specifically to make "committed" and "delivered" two explicitly tracked
 states instead of one inferred from the other.
 
 ## Rerun with SpoolPi (2026-09-27)
@@ -93,7 +93,7 @@ widens it, and raises the redelivery count, but never the post-dedupe count.
 
 What neither design can do is keep readings that were sampled but not yet committed when the
 process died. In both, that window is at most one commit batch (15 readings here). SpoolPi
-documents it as its loss bound, and the M2 crash test checks it across 1,000 kills.
+documents it as its loss bound, and the buffer crash test checks it across 1,000 kills.
 
 ## Caveats
 

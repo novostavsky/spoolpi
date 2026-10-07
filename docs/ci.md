@@ -1,8 +1,8 @@
 # CI
 
-All of SpoolPi's CI is one script, `ci/run.sh`. Today it runs locally, in the Debian WSL2
-distro that holds the repo. When the project moves to GitHub, each workflow job will call
-one stage of the same script (see the end of this page), so nothing gets rewritten.
+All of SpoolPi's CI is one script, `ci/run.sh`. It runs locally, in the Debian WSL2
+distro that holds the repo, and on GitHub Actions, where each workflow job calls one stage of
+the same script (see the end of this page), so nothing is written twice.
 
 ## Stages
 
@@ -95,7 +95,7 @@ Every job calls `ci/run.sh`, so the workflows only prepare the machine.
 | package | `ci/run.sh package` | setup-uv |
 | crash (needs test) | `ci/run.sh crash` | same as test |
 
-**`.github/workflows/nightly.yml`:** `schedule: cron "0 3 * * *"` plus `workflow_dispatch`,
+**`.github/workflows/nightly.yml`:** `schedule: cron "0 3 * * 0"` (weekly) plus `workflow_dispatch`,
 running `ci/run.sh nightly` with the test job's setup and `timeout-minutes: 120`. On failure,
 upload `.ci/logs/` as an artifact; the crash seeds are in `summary.txt`.
 

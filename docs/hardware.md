@@ -97,7 +97,8 @@ buffer, and the checker then created an empty database file itself. Two fixes:
 - **Both meet the target. MQTT is close:** 1.8 MB of headroom. paho and its network thread add
   ~4 MB.
 - **Memory grew ~0.2 MB after warm-up in both,** consistent with SQLite's 2 MB page cache
-  filling. The seven-day run will confirm there's no leak.
+  filling. The seven-day run confirmed there's no leak: RSS fell from 25.3 to 16.3 MB over 190 h
+  (see "Seven-day run" below).
 - The MQTT run published to a mosquitto on the Pi itself. `bash bench/pi/install_test_tools.sh`
   unpacks one without root, and the MQTT integration tests pass against it on ARM (14/14).
 

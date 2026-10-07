@@ -5,7 +5,9 @@
 First release. It works end to end on a device, from the sensor to Postgres, and is tested
 against real SIGKILLs, a real MQTT broker and a real database. It's measured on a Raspberry Pi
 Zero 2 W, on 64-bit and on 32-bit Raspberry Pi OS: SD-card commit latency, simulated power cuts
-and real plug pulls, memory (< 30 MB), and a real NTP step. See `docs/hardware.md`.
+and real plug pulls, memory (< 30 MB), a real NTP step, and a seven-day run on a 32-bit Pi
+with deliberate broker outages (190 h, 6.8 million readings, 0 holes, 0 restarts). See
+`docs/hardware.md`.
 
 ### Buffer and delivery
 - SQLite WAL buffer. A SIGKILL loses at most the uncommitted batch (default 50 readings or 1 s),

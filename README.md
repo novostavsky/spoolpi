@@ -101,7 +101,7 @@ host = "broker.example.org"
 | [Library](docs/library.md) | the Python API: `SpoolPi`, `write`, `tick`, `drain`, errors, threads |
 | [Receiving data](#receiving-data) | MQTT topics, the HTTP contract, the Postgres consumer |
 | [Motivation](docs/motivation.md) | the crash experiments behind the headline numbers |
-| [Hardware](docs/hardware.md) | measurements on a Raspberry Pi Zero 2 W: SD-card commit latency, memory, ARM test run |
+| [Hardware](docs/hardware.md) | measurements on a Raspberry Pi Zero 2 W: SD-card commit latency, memory, power cuts, a seven-day run |
 | [CI](docs/ci.md) | how SpoolPi itself is tested |
 | [Roadmap](docs/roadmap.md) | known limitations of v0.1, with workarounds, and what may come next |
 | [Changelog](CHANGELOG.md) | |
