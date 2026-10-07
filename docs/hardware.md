@@ -357,6 +357,18 @@ it with `sudo bash ~/spoolpi/bench/pi/soak/uninstall.sh`; the data stays in `~/s
 - **Stability:** no unexplained restarts.
 - **Disk:** the buffer file levels off.
 
+**Result (checked 2026-10-07, 190.1 h, 32-bit Zero 2 W): all four pass.**
+
+| Criterion | Measured |
+|---|---|
+| Delivery | 6,845,180 readings received (>= 6,842,670 written), **0 holes, 0 tail loss**, no gap records; 33 duplicates absorbed by `(buffer_id, seq)`; all `ts_quality 2`; 32 / 32 outages recovered |
+| Memory | RSS 25.3 → 16.3 MB (max 27.7 MB); VmSize 69.9 → 72.4 MB, flat; 5 threads max |
+| Stability | 0 restarts of SpoolPi or the receiver; 1 boot |
+| Disk | buffer file 4.1 MB at the end; backlog peaked at 32,580 and drained to 0 |
+
+SD-card writes were about 14.5 GB/day (114.7 GB over the run). Budget for that on a long
+deployment.
+
 ## 32-bit Raspberry Pi OS (2026-09-29)
 
 The same Zero 2 W and card, reflashed with Raspberry Pi OS Lite **32-bit**, i.e. trixie:
