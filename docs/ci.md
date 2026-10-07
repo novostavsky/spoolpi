@@ -82,8 +82,9 @@ Two probes also check the machine itself:
 
 ## Moving to GitHub Actions
 
-When the repo gets a GitHub remote, add two workflow files. Every job calls `ci/run.sh`, so
-the workflows only prepare the machine.
+The repo is a private GitHub repository (`novostavsky/spoolpi`, decided 2026-10-07), and the two
+workflow files below are in `.github/workflows/`. The nightly runs weekly (Sunday 03:00 UTC).
+Every job calls `ci/run.sh`, so the workflows only prepare the machine.
 
 **`.github/workflows/ci.yml`**, on push and pull request:
 

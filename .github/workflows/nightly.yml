@@ -1,0 +1,31 @@
+# The 10,000-cycle crash run. Weekly, because the repository is private and a nightly
+# run (~60 min) would use up the free Actions minutes. See docs/ci.md.
+name: nightly
+
+on:
+  schedule:
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nightly:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Integration test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mosquitto postgresql
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: bash ci/run.sh nightly
+      - name: Upload CI logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs
+          path: .ci/logs/

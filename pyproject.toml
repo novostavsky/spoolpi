@@ -28,6 +28,10 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.urls]
+Repository = "https://github.com/novostavsky/spoolpi"
+Issues = "https://github.com/novostavsky/spoolpi/issues"
+
 [project.optional-dependencies]
 mqtt = ["paho-mqtt>=2.0"]
 http = ["httpx>=0.27"]
